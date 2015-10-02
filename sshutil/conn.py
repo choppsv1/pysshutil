@@ -334,9 +334,11 @@ class SSHClientSession (SSHConnection):
         return self.chan.recv(size)
 
 
-def _setup_module (unused):
+def setup_travis ():
+    import sys
     global private_key                                      # pylint: disable=W0603
-    from sshutil.cmd import ShellCommand
+
+    logging.basicConfig(level=logging.DEBUG, stream=sys.stderr)
     print("Setup called.")
     if 'USER' in os.environ:
         if os.environ['USER'] != "travis":
@@ -355,7 +357,7 @@ def _setup_module (unused):
     else:
         logger.error("Creating ssh dir " + ssh_dir)
         print("Creating ssh dir " + ssh_dir)
-        ShellCommand("mkdir -p {}".format(ssh_dir)).run()
+        os.system("mkdir -p {}".format(ssh_dir))
         priv = ssh.RSAKey.generate(bits=1024)
         private_key = priv
 
