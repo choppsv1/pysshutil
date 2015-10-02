@@ -20,6 +20,7 @@ import logging
 import os
 import subprocess
 from sshutil import conn
+from sshutil.conn import setup_travis
 
 __author__ = 'Christian Hopps'
 __version__ = '1.0'
@@ -369,6 +370,9 @@ class Host (object):
     def run (self, command):
         return self.cmd_class(self.get_cmd(command)).run()
 
+
+def setup_module (unused):
+    setup_travis()
 
 if __name__ == "__main__":
     import time
