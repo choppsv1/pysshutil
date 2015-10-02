@@ -20,6 +20,7 @@ import logging
 import os
 import subprocess
 from sshutil import conn
+from sshutil.conn import _setup_module as setup_module
 
 __author__ = 'Christian Hopps'
 __version__ = '1.0'
