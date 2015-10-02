@@ -13,16 +13,21 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import os
 from setuptools import setup
 
 required = [
     "paramiko>=1.10.1",
 ]
 
+
+def read(fname):
+    return open(os.path.join(os.path.dirname(__file__), fname)).read()
+
 setup (name='sshutil',
-       version='0.9.0',
+       version='0.9.1',
        description='Python SSH Utility Library',
-       long_description=open("README.md").read(),
+       long_description=read("README.md"),
        author='Christian E. Hopps',
        author_email='chopps@gmail.com',
        license='Apache License, Version 2.0',
