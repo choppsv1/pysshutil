@@ -335,8 +335,11 @@ class SSHClientSession (SSHConnection):
 
 
 def _setup_module (unused):
-    global private_key                                      # pylint: disable=W0603
     from sshutil.cmd import ShellCommand
+    import sys
+    global private_key                                      # pylint: disable=W0603
+
+    logging.basicConfig(level=logging.DEBUG, stream=sys.stderr)
     print("Setup called.")
     if 'USER' in os.environ:
         if os.environ['USER'] != "travis":
