@@ -31,10 +31,5 @@ def setup_module (unused):
 
 
 def test_ssh_command ():
-    print("SSHCommand test")
-    try:
-        cmd = SSHCommand("ls -d /etc", "localhost", debug=True)
-        print(cmd.run())
-    except:
-        import pdb
-        pdb.set_trace()
+    cmd = SSHCommand("ls -d /etc", "localhost", debug=True)
+    print(cmd.run())
