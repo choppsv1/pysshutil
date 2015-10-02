@@ -26,8 +26,8 @@ __docformat__ = "restructuredtext en"
 
 
 def setup_module (unused):
-    from sshutil.conn import _setup_module
-    _setup_module(None)
+    from sshutil.conn import setup_travis
+    setup_travis()
 
 
 def test_ssh_command ():
