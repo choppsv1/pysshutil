@@ -20,7 +20,7 @@ import logging
 import os
 import subprocess
 from sshutil import conn
-from sshutil.conn import _setup_module as setup_module
+from sshutil.conn import _setup_module
 
 __author__ = 'Christian Hopps'
 __version__ = '1.0'
@@ -370,6 +370,9 @@ class Host (object):
     def run (self, command):
         return self.cmd_class(self.get_cmd(command)).run()
 
+
+def setup_module (unused):
+    _setup_module(unused)
 
 if __name__ == "__main__":
     import time

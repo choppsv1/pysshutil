@@ -334,7 +334,7 @@ class SSHClientSession (SSHConnection):
         return self.chan.recv(size)
 
 
-def _setup_module (unused):
+def setup_module (unused):
     from sshutil.cmd import ShellCommand
     import sys
     global private_key                                      # pylint: disable=W0603
