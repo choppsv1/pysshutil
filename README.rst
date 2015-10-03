@@ -1,6 +1,6 @@
 
-Utilities for ssh (``parmiko``)
-===============================
+Utilities for ssh (``paramiko``)
+================================
 
 The following modules are a collection of classes and functions
 useful for efficiently interacting with local and remote hosts
