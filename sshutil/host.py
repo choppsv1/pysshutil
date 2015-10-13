@@ -16,7 +16,9 @@
 #
 from __future__ import absolute_import, division, unicode_literals, print_function, nested_scopes
 import functools
+import paramiko as ssh
 from sshutil.cmd import shell_escape_single_quote, SSHCommand, ShellCommand
+from sshutil.conn import SSHClientSession
 
 __author__ = 'Christian Hopps'
 __version__ = '1.0'
@@ -29,6 +31,8 @@ class Host (object):
         A host object is either local or remote and provides easy access
         to the given local or remote host
         """
+        self.sftp = None
+        self.sftp_session = None
         self.cwd = cwd
         if server:
             self.cmd_class = functools.partial(SSHCommand,
@@ -37,13 +41,33 @@ class Host (object):
                                                username=username,
                                                password=password,
                                                debug=debug)
+            self.session_class = functools.partial(SSHClientSession,
+                                                   host=server,
+                                                   port=port,
+                                                   username=username,
+                                                   password=password,
+                                                   debug=debug)
         else:
             self.cmd_class = functools.partial(ShellCommand, debug=debug)
+            self.session_class = None
+            # XXX we'd really like to pretend to be connected to localhost without
+            # actually requiring ssh be functional for connect to localhost.
 
         if not self.cwd:
             self.cwd = self.cmd_class("pwd").run().strip()
 
-    def get_cmd (self, command):
+    def _get_sftp (self):
+        if self.sftp is None:
+            self.sftp_session = self.session_class(subsystem="sftp")
+            try:
+                self.sftp = ssh.sftp_client.SFTPClient(self.sftp_session.chan)
+            except Exception as error:
+                import pdb
+                pdb.set_trace()
+            self.sftp.chdir(self.cwd)
+        return self.sftp
+
+    def _get_cmd (self, command):
         return "bash -c 'cd {} && {}'".format(self.cwd, shell_escape_single_quote(command))
 
     def run_status_stderr (self, command):
@@ -64,13 +88,21 @@ class Host (object):
         >>> print(error, end="")
         grep: doesnt-exist: No such file or directory
         """
-        return self.cmd_class(self.get_cmd(command)).run_status_stderr()
+        return self.cmd_class(self._get_cmd(command)).run_status_stderr()
 
     def run_status (self, command):
-        return self.cmd_class(self.get_cmd(command)).run_status()
+        return self.cmd_class(self._get_cmd(command)).run_status()
 
     def run_stderr (self, command):
-        return self.cmd_class(self.get_cmd(command)).run_stderr()
+        return self.cmd_class(self._get_cmd(command)).run_stderr()
 
     def run (self, command):
-        return self.cmd_class(self.get_cmd(command)).run()
+        return self.cmd_class(self._get_cmd(command)).run()
+
+    def copy_to (self, localfile, remotefile):
+        if self.session_class:
+            sftp = self._get_sftp()
+            sftp.put(localfile, remotefile)
+        else:
+            # XXX Invoke local version
+            pass

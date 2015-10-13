@@ -25,7 +25,7 @@ def read(fname):
     return open(os.path.join(os.path.dirname(__file__), fname)).read()
 
 setup (name='sshutil',
-       version='0.9.4',
+       version='0.9.5',
        description='Python SSH Utility Library',
        long_description=read("README.rst"),
        author='Christian E. Hopps',

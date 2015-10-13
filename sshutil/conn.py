@@ -54,6 +54,7 @@ def shell_escape_single_quote (command):
 
 class SSHConnection (object):
     """A connection to an SSH server"""
+    ssh_config = None
     ssh_sockets = {}
     ssh_socket_keys = {}
     ssh_socket_timeout = {}
@@ -72,6 +73,7 @@ class SSHConnection (object):
 
         self.username = username
         self.password = password
+
         self.ssh = self.get_ssh_socket(host, port, username, password, debug)
 
         # Open a session.
@@ -102,7 +104,85 @@ class SSHConnection (object):
         return self.chan and self.ssh and self.ssh.is_active()
 
     @classmethod
+    def init_class_config (cls):
+        # XXX do we want to initialize this elsewhere?
+        if cls.ssh_config is None:
+            cls.ssh_config = ssh.config.SSHConfig()
+            configname = os.path.expanduser("~/.ssh/config")
+            if os.path.exists(configname):
+                with open(configname) as f:
+                    cls.ssh_config.parse(f)
+
+    @classmethod
+    def open_os_socket (cls, host, port, use_config=True):
+        if use_config:
+            cls.init_class_config()
+            config = cls.ssh_config.lookup(host)
+
+            # If we have a proxy command use that.
+            if 'proxycommand' in config:
+                proxy = config['proxycommand']
+                proxy = proxy.replace('%h', host)
+                proxy = proxy.replace('%p', str(port))
+                logger.debug("Using proxy command for host %s port %s: %s",
+                             host,
+                             str(port),
+                             proxy)
+                return ssh.ProxyCommand(proxy)
+
+            if 'port' in config:
+                newport = config['port']
+            else:
+                newport = port
+
+            if 'host' in config:
+                host = config['host']
+
+            if 'port' in config:
+                if port != 22 and port != newport:
+                    # XXX should we just never do this?
+                    logger.warn("Remaping non-std ssh port %d using config to port %d",
+                                port,
+                                newport)
+                port = newport
+
+        # Otherwise try and resolve host and open an OS socket.
+        attempt = 0
+        try:
+            error = None
+            for addrinfo in socket.getaddrinfo(host,
+                                               port,
+                                               socket.AF_UNSPEC,
+                                               socket.SOCK_STREAM):
+                af, socktype, proto, unused_name, sa = addrinfo
+                try:
+                    ossock = socket.socket(af, socktype, proto)
+                    ossock.connect(sa)
+                    if attempt:
+                        logger.debug("Succeeded after %s attempts to : %s", str(attempt), str(addrinfo))
+                    return ossock
+                except socket.error as ex:
+                    logger.debug("Got socket error connecting to: %s: %s", str(addrinfo), str(ex))
+                    attempt += 1
+                    error = ex
+                    continue
+            if error is not None:
+                logger.debug("Got error connecting to: %s: %s (no addr)",
+                             str(addrinfo),                 # pylint: disable=W0631
+                             str(error))
+                raise error                                 # pylint: disable=E0702
+            raise Exception("Couldn't connect to any resolution for {}:{}".format(host, port))
+        except Exception as ex:
+            logger.error("Got unexpected socket error connecting to: %s:%s: %s",
+                         str(host),
+                         str(port),
+                         str(ex))
+            raise
+
+    @classmethod
     def get_ssh_socket (cls, host, port, username, password, debug):
+        # XXX should we map the username from config here? How about only if not port 22?
+
         # Return an open ssh socket if we have one.
         key = "{}:{}:{}".format(host, port, username)
         with cls.ssh_sockets_lock:
@@ -120,39 +200,7 @@ class SSHConnection (object):
                         return sshsock
                 # This means there are no entries with free channels
 
-            attempt = 0
-
-            try:
-                error = None
-                for addrinfo in socket.getaddrinfo(host,
-                                                   port,
-                                                   socket.AF_UNSPEC,
-                                                   socket.SOCK_STREAM):
-                    af, socktype, proto, unused_name, sa = addrinfo
-                    try:
-                        ossock = socket.socket(af, socktype, proto)
-                        ossock.connect(sa)
-                        if attempt:
-                            logger.debug("Succeeded after %s attempts to : %s", str(attempt), str(addrinfo))
-                        break
-                    except socket.error as ex:
-                        ossock = None
-                        logger.debug("Got socket error connecting to: %s: %s", str(addrinfo), str(ex))
-                        attempt += 1
-                        error = ex
-                        continue
-                else:
-                    if error is not None:
-                        logger.debug("Got error connecting to: %s: %s (no addr)", str(addrinfo), str(error))
-                        raise error                             # pylint: disable=E0702
-                    raise Exception("Couldn't connect to any resolution for {}:{}".format(host, port))
-            except Exception as ex:
-                logger.error("Got unexpected socket error connecting to: %s:%s: %s",
-                             str(host),
-                             str(port),
-                             str(ex))
-                raise
-
+            ossock = cls.open_os_socket(host, port)
             try:
                 if debug:
                     logger.debug("Opening SSH socket to %s:%s", str(host), str(port))
@@ -302,25 +350,7 @@ class SSHConnection (object):
                 cls.ssh_sockets[key].remove(entry)
 
 
-class SSHClientSession (SSHConnection):
-    """A client session to a host using a subsystem"""
-
-    #---------------------------+
-    # Overriding parent methods
-    #---------------------------+
-
-    def __init__ (self, host, port, subsystem, username=None, password=None, debug=False):
-        super(SSHClientSession, self).__init__(host, port, username, password, debug)
-        try:
-            self.chan.invoke_subsystem(subsystem)
-        except:
-            self.close()
-            raise
-
-    #-------------+
-    # New methods
-    #-------------+
-
+class SSHSession (SSHConnection):
     def send (self, chunk):
         assert self.chan is not None
         self.chan.send(chunk)
@@ -332,6 +362,40 @@ class SSHClientSession (SSHConnection):
     def recv (self, size=MAXSSHBUF):
         assert self.chan is not None
         return self.chan.recv(size)
+
+    def recv_ready (self):
+        assert self.chan is not None
+        return self.chan.recv_ready()
+
+    def recv_stderr (self, size=MAXSSHBUF):
+        assert self.chan is not None
+        return self.chan.recv_stderr(size)
+
+    def recv_stderr_ready (self):
+        assert self.chan is not None
+        return self.chan.recv_stderr_ready()
+
+
+class SSHClientSession (SSHSession):
+    """A client session to a host using a subsystem"""
+    def __init__ (self, host, port, subsystem, username=None, password=None, debug=False):
+        super(SSHClientSession, self).__init__(host, port, username, password, debug)
+        try:
+            self.chan.invoke_subsystem(subsystem)
+        except:
+            self.close()
+            raise
+
+
+class SSHCommandSession (SSHSession):
+    """A client session to a host using a command i.e., like a remote pipe"""
+    def __init__ (self, host, port, command, username=None, password=None, debug=False):
+        super(SSHCommandSession, self).__init__(host, port, username, password, debug)
+        try:
+            self.chan.exec_command(command)
+        except:
+            self.close()
+            raise
 
 
 def setup_travis ():
@@ -373,4 +437,3 @@ def setup_travis ():
             authfile.write("{} {}\n".format(pub.get_name(), pub.get_base64()))
         logger.error("Done generating keys")
         print("Done generating keys")
-
