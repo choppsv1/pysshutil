@@ -218,7 +218,7 @@ class SSHConnection (object):
                     password.get_name
                 except AttributeError:
                     password = password
-                    paskey = None
+                    passkey = None
                 else:
                     passkey = password
                     password = None
