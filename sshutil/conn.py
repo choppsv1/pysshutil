@@ -72,7 +72,6 @@ class SSHConnection (object):
             username = getpass.getuser()
 
         self.username = username
-        self.password = password
 
         self.ssh = self.get_ssh_socket(host, port, username, password, debug)
 
@@ -215,6 +214,15 @@ class SSHConnection (object):
                 # XXX save this if we actually need it.
                 sshsock.get_remote_server_key()
 
+                try:
+                    password.get_name
+                except AttributeError:
+                    password = password
+                    paskey = None
+                else:
+                    passkey = password
+                    password = None
+
                 # try:
                 #     sshsock.auth_none(username)
                 # except (ssh.AuthenticationException, ssh.BadAuthenticationType):
@@ -224,6 +232,12 @@ class SSHConnection (object):
                     try:
                         sshsock.auth_password(username, password, event, False)
                     except (ssh.AuthenticationException, ssh.BadAuthenticationType):
+                        pass
+
+                if not sshsock.is_authenticated() and passkey is not None:
+                    try:
+                        sshsock.auth_publickey(username, passkey, event)
+                    except ssh.AuthenticationException:
                         pass
 
                 if not sshsock.is_authenticated():
