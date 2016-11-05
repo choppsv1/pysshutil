@@ -228,17 +228,24 @@ class SSHConnection (object):
                 # except (ssh.AuthenticationException, ssh.BadAuthenticationType):
                 #     pass
 
+                logger.debug("Trying to authenticate with username: %s", str(username))
                 if not sshsock.is_authenticated() and password is not None:
                     try:
                         sshsock.auth_password(username, password, event, False)
-                    except (ssh.AuthenticationException, ssh.BadAuthenticationType):
-                        pass
+                    except (ssh.AuthenticationException, ssh.BadAuthenticationType) as error:
+                        logger.debug("Password auth failed (cont): %s: %s", str(username), str(error))
+                    else:
+                        if not sshsock.is_authenticated():
+                            logger.warning("Password auth unexpectedly failed (cont): %s: %s", str(username), str(error))
 
                 if not sshsock.is_authenticated() and passkey is not None:
                     try:
                         sshsock.auth_publickey(username, passkey, event)
-                    except ssh.AuthenticationException:
-                        pass
+                    except ssh.AuthenticationException as error:
+                        logger.debug("Pubkey auth failed (cont): %s", str(error))
+                    else:
+                        if not sshsock.is_authenticated():
+                            logger.warning("Password auth unexpectedly failed (cont): %s", str(error))
 
                 if not sshsock.is_authenticated():
                     ssh_keys = ssh.Agent().get_keys()
@@ -251,9 +258,10 @@ class SSHConnection (object):
                             break
                         try:
                             sshsock.auth_publickey(username, ssh_key, event)
-                        except ssh.AuthenticationException:
+                        except ssh.AuthenticationException as error:
                             if idx == lastkey:
                                 raise
+                            logger.debug("Pubkey auth failed (cont): %s", str(error))
                             # Try next key
                 assert sshsock.is_authenticated()
 
