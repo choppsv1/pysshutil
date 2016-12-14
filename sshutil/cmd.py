@@ -20,13 +20,17 @@ import logging
 import os
 import subprocess
 from sshutil import conn
-from sshutil.conn import setup_travis
+from sshutil.cache import setup_travis
 
 __author__ = 'Christian Hopps'
 __version__ = '1.0'
 __docformat__ = "restructuredtext en"
 
 logger = logging.getLogger(__name__)
+
+
+def setup_module (unused):
+    setup_travis()
 
 
 class CalledProcessError (subprocess.CalledProcessError):
@@ -44,7 +48,9 @@ def terminal_size():
     import fcntl
     import termios
     import struct
-    h, w, unused, unused = struct.unpack('HHHH', fcntl.ioctl(0, termios.TIOCGWINSZ, struct.pack('HHHH', 0, 0, 0, 0)))
+    h, w, unused, unused = struct.unpack('HHHH', fcntl.ioctl(0,
+                                                             termios.TIOCGWINSZ,
+                                                             struct.pack('HHHH', 0, 0, 0, 0)))
     return w, h
 
 
@@ -370,9 +376,6 @@ class Host (object):
     def run (self, command):
         return self.cmd_class(self.get_cmd(command)).run()
 
-
-def setup_module (unused):
-    setup_travis()
 
 if __name__ == "__main__":
     import time

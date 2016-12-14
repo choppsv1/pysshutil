@@ -61,9 +61,11 @@ class Host (object):
             self.sftp_session = self.session_class(subsystem="sftp")
             try:
                 self.sftp = ssh.sftp_client.SFTPClient(self.sftp_session.chan)
-            except Exception as error:
-                import pdb
-                pdb.set_trace()
+            except Exception as unused:
+                pass
+                # if debug:
+                #     import pdb
+                #     pdb.set_trace()
             self.sftp.chdir(self.cwd)
         return self.sftp
 

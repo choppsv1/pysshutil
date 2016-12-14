@@ -16,20 +16,18 @@
 # limitations under the License.
 #
 from __future__ import absolute_import, division, unicode_literals, print_function, nested_scopes
-import os
-import paramiko as ssh
 from sshutil.cmd import ShellCommand, SSHCommand
 
-__author__ = 'Christian Hopps'
-__date__ = 'September 26 2015'
-__docformat__ = "restructuredtext en"
-
-
 def setup_module (unused):
-    from sshutil.conn import setup_travis
+    from sshutil.cache import setup_travis
     setup_travis()
 
 
 def test_ssh_command ():
     cmd = SSHCommand("ls -d /etc", "localhost", debug=True)
     print(cmd.run())
+
+
+__author__ = 'Christian Hopps'
+__date__ = 'September 26 2015'
+__docformat__ = "restructuredtext en"

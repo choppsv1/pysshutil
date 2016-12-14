@@ -1,17 +1,13 @@
 language: python
-
-env:
-  - TOXENV=py27
-  - TOXENV=py33
-  - TOXENV=py34
-# Until travis fixes https://github.com/travis-ci/travis-ci/issues/4756
-# - TOXENV=pypy
-# - TOXENV=pypy3
+python:
+    - "2.7"
+    - "3.4"
 
 install:
-  - pip install tox
-  - pip install coveralls
-  - pip install nose
+  - pip install coveralls nose pytest
+  - pip install -r requirements.txt
+  - python setup.py develop
 
 script:
-  - tox -e $TOXENV
+  # Have to order things this way so setup_travis get's called by the test modules
+  - py.test tests --doctest-modules sshutil
