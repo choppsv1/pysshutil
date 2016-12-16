@@ -17,23 +17,12 @@
 from __future__ import absolute_import, division, unicode_literals, print_function, nested_scopes
 import getpass
 import logging
-import os
-import socket
-import threading
-import traceback
-import paramiko as ssh
-
-__author__ = 'Christian Hopps'
-__version__ = '1.0'
-__docformat__ = "restructuredtext en"
+from .cache import SSHConnectionCache, SSHNoConnectionCache
 
 MAXSSHBUF = 16 * 1024
-MAXCHANNELS = 8
-
+g_no_cache = SSHNoConnectionCache()
+g_cmd_cache = SSHConnectionCache("SSH Command Cache")
 logger = logging.getLogger(__name__)
-
-# Used by travis-ci testing
-private_key = None
 
 
 def shell_escape_single_quote (command):
@@ -54,16 +43,14 @@ def shell_escape_single_quote (command):
 
 class SSHConnection (object):
     """A connection to an SSH server"""
-    ssh_config = None
-    ssh_sockets = {}
-    ssh_socket_keys = {}
-    ssh_socket_timeout = {}
-    ssh_sockets_lock = threading.Lock()
+    def __init__ (self, host, port=22, username=None, password=None, debug=False, cache=None):
+        if cache is None:
+            cache = g_no_cache
 
-    def __init__ (self, host, port=22, username=None, password=None, debug=False):
         self.host = host
         self.port = port
         self.debug = debug
+        self.cache = cache
         self.host_key = None
         self.chan = None
         self.ssh = None
@@ -73,7 +60,7 @@ class SSHConnection (object):
 
         self.username = username
 
-        self.ssh = self.get_ssh_socket(host, port, username, password, debug)
+        self.ssh = cache.get_ssh_socket(host, port, username, password, debug)
 
         # Open a session.
         try:
@@ -97,279 +84,10 @@ class SSHConnection (object):
         if hasattr(self, "ssh") and self.ssh:
             tmp = self.ssh
             self.ssh = None
-            self.release_ssh_socket(tmp, self.debug)
+            self.cache.release_ssh_socket(tmp, self.debug)
 
     def is_active (self):
         return self.chan and self.ssh and self.ssh.is_active()
-
-    @classmethod
-    def init_class_config (cls):
-        # XXX do we want to initialize this elsewhere?
-        if cls.ssh_config is None:
-            cls.ssh_config = ssh.config.SSHConfig()
-            configname = os.path.expanduser("~/.ssh/config")
-            if os.path.exists(configname):
-                with open(configname) as f:
-                    cls.ssh_config.parse(f)
-
-    @classmethod
-    def open_os_socket (cls, host, port, use_config=True):
-        if use_config:
-            cls.init_class_config()
-            config = cls.ssh_config.lookup(host)
-
-            # If we have a proxy command use that.
-            if 'proxycommand' in config:
-                proxy = config['proxycommand']
-                proxy = proxy.replace('%h', host)
-                proxy = proxy.replace('%p', str(port))
-                logger.debug("Using proxy command for host %s port %s: %s",
-                             host,
-                             str(port),
-                             proxy)
-                return ssh.ProxyCommand(proxy)
-
-            if 'port' in config:
-                newport = config['port']
-            else:
-                newport = port
-
-            if 'host' in config:
-                host = config['host']
-
-            if 'port' in config:
-                if port != 22 and port != newport:
-                    # XXX should we just never do this?
-                    logger.warn("Remaping non-std ssh port %d using config to port %d",
-                                port,
-                                newport)
-                port = newport
-
-        # Otherwise try and resolve host and open an OS socket.
-        attempt = 0
-        try:
-            error = None
-            for addrinfo in socket.getaddrinfo(host,
-                                               port,
-                                               socket.AF_UNSPEC,
-                                               socket.SOCK_STREAM):
-                af, socktype, proto, unused_name, sa = addrinfo
-                try:
-                    ossock = socket.socket(af, socktype, proto)
-                    ossock.connect(sa)
-                    if attempt:
-                        logger.debug("Succeeded after %s attempts to : %s", str(attempt), str(addrinfo))
-                    return ossock
-                except socket.error as ex:
-                    logger.debug("Got socket error connecting to: %s: %s", str(addrinfo), str(ex))
-                    attempt += 1
-                    error = ex
-                    continue
-            if error is not None:
-                logger.debug("Got error connecting to: %s: %s (no addr)",
-                             str(addrinfo),                 # pylint: disable=W0631
-                             str(error))
-                raise error                                 # pylint: disable=E0702
-            raise Exception("Couldn't connect to any resolution for {}:{}".format(host, port))
-        except Exception as ex:
-            logger.error("Got unexpected socket error connecting to: %s:%s: %s",
-                         str(host),
-                         str(port),
-                         str(ex))
-            raise
-
-    @classmethod
-    def get_ssh_socket (cls, host, port, username, password, debug):
-        # XXX should we map the username from config here? How about only if not port 22?
-
-        # Return an open ssh socket if we have one.
-        key = "{}:{}:{}".format(host, port, username)
-        with cls.ssh_sockets_lock:
-            if key in cls.ssh_sockets:
-                for entry in cls.ssh_sockets[key]:
-                    if entry[2] < MAXCHANNELS:
-                        sshsock = entry[1]
-                        entry[2] += 1
-                        if debug:
-                            logger.debug("Incremented SSH socket use to %s", str(entry[2]))
-
-                        # Cancel any timeout for closing, only really need to do this on count == 1.
-                        cls.cancel_close_socket_expire(sshsock, debug)
-
-                        return sshsock
-                # This means there are no entries with free channels
-
-            ossock = cls.open_os_socket(host, port)
-            try:
-                if debug:
-                    logger.debug("Opening SSH socket to %s:%s", str(host), str(port))
-
-                sshsock = ssh.Transport(ossock)
-                # self.ssh.set_missing_host_key_policy(ssh.AutoAddPolicy())
-
-                # XXX this takes an event so we could yield here to wait for event.
-                event = None
-                sshsock.start_client(event)
-
-                # XXX save this if we actually need it.
-                sshsock.get_remote_server_key()
-
-                try:
-                    password.get_name
-                except AttributeError:
-                    password = password
-                    passkey = None
-                else:
-                    passkey = password
-                    password = None
-
-                # try:
-                #     sshsock.auth_none(username)
-                # except (ssh.AuthenticationException, ssh.BadAuthenticationType):
-                #     pass
-
-                logger.debug("Trying to authenticate with username: %s", str(username))
-                if not sshsock.is_authenticated() and password is not None:
-                    try:
-                        sshsock.auth_password(username, password, event, False)
-                    except (ssh.AuthenticationException, ssh.BadAuthenticationType) as error:
-                        logger.debug("Password auth failed (cont): %s: %s", str(username), str(error))
-                    else:
-                        if not sshsock.is_authenticated():
-                            logger.warning("Password auth unexpectedly failed (cont): %s: %s", str(username), str(error))
-
-                if not sshsock.is_authenticated() and passkey is not None:
-                    try:
-                        sshsock.auth_publickey(username, passkey, event)
-                    except ssh.AuthenticationException as error:
-                        logger.debug("Pubkey auth failed (cont): %s", str(error))
-                    else:
-                        if not sshsock.is_authenticated():
-                            logger.warning("Password auth unexpectedly failed (cont): %s", str(error))
-
-                if not sshsock.is_authenticated():
-                    ssh_keys = ssh.Agent().get_keys()
-                    if private_key:
-                        # Used by travis-ci
-                        ssh_keys += ( private_key, )
-                    lastkey = len(ssh_keys) - 1
-                    for idx, ssh_key in enumerate(ssh_keys):
-                        if sshsock.is_authenticated():
-                            break
-                        try:
-                            sshsock.auth_publickey(username, ssh_key, event)
-                        except ssh.AuthenticationException as error:
-                            if idx == lastkey:
-                                raise
-                            logger.debug("Pubkey auth failed (cont): %s", str(error))
-                            # Try next key
-                assert sshsock.is_authenticated()
-
-                # nextauth (rval from above) would be a secondary authentication e.g., google authenticator.
-
-                # XXX using the below instead of the breakout above fails threaded.
-                # sshsock.connect(hostkey=None,
-                #                 username=self.username,
-                #                 password=self.password)
-
-                if key not in cls.ssh_sockets:
-                    cls.ssh_sockets[key] = []
-                # Add this socket to the list of sockets for this key
-                cls.ssh_sockets[key].append([ossock, sshsock, 1])
-                cls.ssh_socket_keys[sshsock] = key
-                return sshsock
-            except ssh.AuthenticationException as error:
-                ossock.close()
-                logger.error("Authentication failed: %s", str(error))
-                raise
-
-    @classmethod
-    def cancel_close_socket_expire (cls, ssh_socket, debug):
-        """Must enter locked"""
-        if not ssh_socket:
-            return
-        if ssh_socket not in cls.ssh_socket_timeout:
-            return
-        if debug:
-            logger.debug("Canceling timer to release ssh socket: %s", str(ssh_socket))
-        timer = cls.ssh_socket_timeout[ssh_socket]
-        del cls.ssh_socket_timeout[ssh_socket]
-        timer.cancel()
-
-    @classmethod
-    def _close_socket_expire (cls, ssh_socket, debug):
-        if not ssh_socket:
-            return
-
-        with cls.ssh_sockets_lock:
-            # If we aren't present anymore must have been canceled
-            if ssh_socket not in cls.ssh_socket_timeout:
-                return
-
-            if debug:
-                logger.debug("Timer expired, releasing ssh socket: %s", str(ssh_socket))
-
-            # Remove any timeout
-            del cls.ssh_socket_timeout[ssh_socket]
-            cls._close_socket(ssh_socket, debug)
-
-    @classmethod
-    def release_ssh_socket (cls, ssh_socket, debug):
-        if not ssh_socket:
-            return
-
-        with cls.ssh_sockets_lock:
-            key = cls.ssh_socket_keys[ssh_socket]
-
-            assert key in cls.ssh_sockets
-            entry = None
-            for entry in cls.ssh_sockets[key]:
-                if entry[1] == ssh_socket:
-                    break
-            else:
-                raise KeyError("Can't find {} in list of entries".format(key))
-
-            entry[2] -= 1
-            if entry[2]:
-                if debug:
-                    logger.debug("Decremented SSH socket use to %s", str(entry[2]))
-                return
-
-            # We are all done with this socket
-            # Setup a timer to actually close the socket.
-            if ssh_socket not in cls.ssh_socket_timeout:
-                if debug:
-                    logger.debug("Setting up timer to release ssh socket: %s", str(ssh_socket))
-                cls.ssh_socket_timeout[ssh_socket] = threading.Timer(1, cls._close_socket_expire, [ssh_socket, debug])
-                cls.ssh_socket_timeout[ssh_socket].start()
-
-    @classmethod
-    def _close_socket (cls, ssh_socket, debug):
-        entry = None
-        try:
-            key = cls.ssh_socket_keys[ssh_socket]
-            for entry in cls.ssh_sockets[key]:
-                if entry[1] == ssh_socket:
-                    break
-            else:
-                assert False
-
-            if debug:
-                logger.debug("Closing SSH socket to %s", str(key))
-            if entry[1]:
-                entry[1].close()
-                entry[1] = None
-
-            if entry[0]:
-                entry[0].close()
-                entry[0] = None
-        except Exception as error:
-            logger.info("%s: Unexpected exception: %s: %s", str(cls), str(error), traceback.format_exc())
-            logger.error("%s: Unexpected error closing socket:  %s", str(cls), str(error))
-        finally:
-            del cls.ssh_socket_keys[ssh_socket]
-            if entry:
-                cls.ssh_sockets[key].remove(entry)
 
 
 class SSHSession (SSHConnection):
@@ -400,8 +118,8 @@ class SSHSession (SSHConnection):
 
 class SSHClientSession (SSHSession):
     """A client session to a host using a subsystem"""
-    def __init__ (self, host, port, subsystem, username=None, password=None, debug=False):
-        super(SSHClientSession, self).__init__(host, port, username, password, debug)
+    def __init__ (self, host, port, subsystem, username=None, password=None, debug=False, cache=None):
+        super(SSHClientSession, self).__init__(host, port, username, password, debug, cache)
         try:
             self.chan.invoke_subsystem(subsystem)
         except:
@@ -411,8 +129,10 @@ class SSHClientSession (SSHSession):
 
 class SSHCommandSession (SSHSession):
     """A client session to a host using a command i.e., like a remote pipe"""
-    def __init__ (self, host, port, command, username=None, password=None, debug=False):
-        super(SSHCommandSession, self).__init__(host, port, username, password, debug)
+    def __init__ (self, host, port, command, username=None, password=None, debug=False, cache=None):
+        if cache is None:
+            cache = g_cmd_cache
+        super(SSHCommandSession, self).__init__(host, port, username, password, debug, cache)
         try:
             self.chan.exec_command(command)
         except:
@@ -420,42 +140,6 @@ class SSHCommandSession (SSHSession):
             raise
 
 
-def setup_travis ():
-    import sys
-    global private_key                                      # pylint: disable=W0603
-
-    logging.basicConfig(level=logging.DEBUG, stream=sys.stderr)
-    print("Setup called.")
-    if 'USER' in os.environ:
-        if os.environ['USER'] != "travis":
-            return
-    else:
-        if getpass.getuser() != "travis":
-            return
-
-    print("Executing under Travis-CI")
-    ssh_dir = "{}/.ssh".format(os.environ['HOME'])
-    priv_filename = os.path.join(ssh_dir, "id_rsa")
-    if os.path.exists(priv_filename):
-        logger.error("Found private keyfile")
-        print("Found private keyfile")
-        return
-    else:
-        logger.error("Creating ssh dir " + ssh_dir)
-        print("Creating ssh dir " + ssh_dir)
-        os.system("mkdir -p {}".format(ssh_dir))
-        priv = ssh.RSAKey.generate(bits=1024)
-        private_key = priv
-
-        logger.error("Generating private keyfile " + priv_filename)
-        print("Generating private keyfile " + priv_filename)
-        priv.write_private_key_file(filename=priv_filename)
-
-        pub = ssh.RSAKey(filename=priv_filename)
-        auth_filename = os.path.join(ssh_dir, "authorized_keys")
-        logger.error("Adding keys to authorized_keys file " + auth_filename)
-        print("Adding keys to authorized_keys file " + auth_filename)
-        with open(auth_filename, "a") as authfile:
-            authfile.write("{} {}\n".format(pub.get_name(), pub.get_base64()))
-        logger.error("Done generating keys")
-        print("Done generating keys")
+__author__ = 'Christian Hopps'
+__version__ = '1.0'
+__docformat__ = "restructuredtext en"
