@@ -71,7 +71,6 @@ def shell_escape_single_quote (command):
 
 
 class SSHCommand (conn.SSHConnection):
-
     def __init__ (self, command, host, port=22, username=None, password=None, debug=False):
         self.command = command
         self.exit_code = None
@@ -79,6 +78,10 @@ class SSHCommand (conn.SSHConnection):
         self.error_output = ""
 
         super(SSHCommand, self).__init__(host, port, username, password, debug)
+
+    def _get_pty (self):
+        width, height = terminal_size()
+        return self.chan.get_pty(term=os.environ['TERM'], width=width, height=height)
 
     def run_status_stderr (self):
         """
@@ -99,6 +102,8 @@ class SSHCommand (conn.SSHConnection):
         grep: doesnt-exist: No such file or directory
         """
         try:
+            if isinstance(self, SSHPTYCommand):
+                self._get_pty()
             self.chan.exec_command(self.command)
             self.exit_code = self.chan.recv_exit_status()
 
@@ -166,18 +171,45 @@ class SSHCommand (conn.SSHConnection):
 
 
 class SSHPTYCommand (SSHCommand):
+    """Instances of this class also obtain a PTY prior to executing the command"""
 
-    def __init__ (self, command, host, port=22, username=None, password=None, debug=False):
-        self.command = command
-        self.exit_code = None
-        self.output = ""
-        self.error_output = ""
+    def run_status_stderr (self):
+        """
+        Run a command over an ssh channel, return exit code, stdout and stderr.
 
-        super(SSHPTYCommand, self).__init__(host, port, username, password, debug)
+        >>> status, output, error = SSHCommand("ls -d /etc", "localhost").run_status_stderr()
+        >>> status
+        0
+        >>> print(output, end="")
+        /etc
+        >>> print(error, end="")
+        >>> status, output, error = SSHCommand("grep foobar doesnt-exist", "localhost").run_status_stderr()
+        >>> status
+        2
+        >>> print(output, end="")
+        >>>
+        >>> print(error, end="")
+        grep: doesnt-exist: No such file or directory
+        """
+        return super(SSHPTYCommand, self).run_status_stderr()
 
-    def _get_pty (self):
-        width, height = terminal_size()
-        return self.chan.get_pty(term=os.environ['TERM'], width=width, height=height)
+    def run_stderr (self):
+        """
+        Run a command over an ssh channel, return stdout and stderr,
+        Raise CalledProcessError on failure
+
+        >>> cmd = SSHCommand("ls -d /etc", "localhost")
+        >>> output, error = cmd.run_stderr()
+        >>> print(output, end="")
+        /etc
+        >>> print(error, end="")
+        >>> cmd = SSHCommand("grep foobar doesnt-exist", "localhost")
+        >>> cmd.run_stderr()                                    # doctest: +IGNORE_EXCEPTION_DETAIL
+        Traceback (most recent call last):
+            ...
+        CalledProcessError: Command 'grep foobar doesnt-exist' returned non-zero exit status 2
+        """
+        return super(SSHPTYCommand, self).run_stderr()
 
     def run_status (self):
         """
@@ -193,16 +225,7 @@ class SSHPTYCommand (SSHCommand):
         2
         >>> print(output, end="")
         """
-        try:
-            self._get_pty()
-            self.chan.exec_command(self.command)
-            self.exit_code = self.chan.recv_exit_status()
-
-            self.output = "".join([x.decode('utf-8') for x in read_to_eof(self.chan.recv)])
-
-            return (self.exit_code, self.output)
-        finally:
-            self.close()
+        return super(SSHPTYCommand, self).run_status()
 
     def run (self):
         """
@@ -218,11 +241,7 @@ class SSHPTYCommand (SSHCommand):
             ...
         CalledProcessError: Command 'grep foobar doesnt-exist' returned non-zero exit status 2
         """
-        status, unused, unused = self.run_status_stderr()
-        if status != 0:
-            raise CalledProcessError(self.exit_code, self.command,
-                                     self.error_output if self.error_output else self.output)
-        return self.output
+        return super(SSHPTYCommand, self).run()
 
 
 class ShellCommand (object):
