@@ -395,7 +395,6 @@ class SSHServer (object):
             self.close_wsocket, self.close_rsocket = socket.socketpair()
 
             self.lock = threading.Lock()
-            self.session_id = 0
             self.sockets = []
 
             self.thread = threading.Thread(None,
