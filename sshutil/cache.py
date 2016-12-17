@@ -2,7 +2,7 @@
 #
 # December 14 2016, Christian Hopps <chopps@gmail.com>
 #
-# Copyright (c) 2015, Deutsche Telekom AG.
+# Copyright (c) 2016, Deutsche Telekom AG.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -233,7 +233,7 @@ class SSHNoConnectionCache (_SSHConnectionCache):
         sshsock.os_socket = ossock
         return sshsock
 
-    def flush (self, debug=False):
+    def flush (self, debug=False):          # pylint: disable=W0613
         return
 
 

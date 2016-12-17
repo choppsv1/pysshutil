@@ -17,14 +17,11 @@
 # limitations under the License.
 #
 from __future__ import absolute_import, division, unicode_literals, print_function, nested_scopes
-from sshutil.cache import SSHConnectionCache, SSHNoConnectionCache
-import socket
 import errno
 import getpass
 import logging
 import socket
-import sys
-import threading
+from sshutil.cache import SSHConnectionCache, SSHNoConnectionCache
 import sshutil.conn as conn
 import sshutil.server as server
 
@@ -47,7 +44,6 @@ def setup_module (unused_module):
         server_ctl = server.SSHUserPassController(username=getpass.getuser(),
                                                   password="admin")
         ssh_server = server.SSHServer(server_ctl,
-                                      server.SSHServerSocket,
                                       host_key="tests/host_key",
                                       debug=SERVER_DEBUG)
         setup_module.init = True
@@ -78,7 +74,6 @@ def test_close ():
     session.close()
 
 
-
 def test_multi_session ():
     logger.debug("Starting multi-session test")
     sessions = []
@@ -99,7 +94,6 @@ def _test_server_close (cache):
         try:
             logger.info("Create server on port %d", port)
             ns = server.SSHServer(server_ctl,
-                                  server.SSHServerSocket,
                                   port=port,
                                   host_key="tests/host_key",
                                   debug=SERVER_DEBUG)
@@ -132,7 +126,6 @@ def _test_server_close (cache):
     for i in range(0, 10):
         logger.debug("Starting %d iteration", i)
         ns = server.SSHServer(server_ctl,
-                              server.SSHServerSocket,
                               port=port,
                               host_key="tests/host_key",
                               debug=SERVER_DEBUG)
@@ -162,14 +155,12 @@ def test_server_close_cache ():
     _test_server_close(SSHConnectionCache("test multi open cache"))
 
 
-
 def _test_multi_open (client_cache):
 
     logger.info("Create Server")
     server_ctl = server.SSHUserPassController(username=getpass.getuser(),
                                               password="admin")
     ns = server.SSHServer(server_ctl,
-                          server.SSHServerSocket,
                           port=NC_PORT,
                           host_key="tests/host_key",
                           debug=SERVER_DEBUG)

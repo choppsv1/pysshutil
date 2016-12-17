@@ -26,7 +26,7 @@ uninstall:
 	$(PIP) uninstall -y sshutil
 
 lint:
-	@for f in $$(find sshutil -name '*.py'); do \
+	@for f in $$(find sshutil tests -name '*.py'); do \
 		echo "=== Linting $$f"; \
 		$(PYLINT) -r n --rcfile=pylintrc $$f; \
 	done

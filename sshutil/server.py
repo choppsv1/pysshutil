@@ -1,11 +1,20 @@
 # -*- coding: utf-8 -*-#
+#
 # December 14 2016, Christian Hopps <chopps@gmail.com>
 #
-# Copyright (c) 2016 by Christian E. Hopps.
-# All rights reserved.
+# Copyright (c) 2016, Deutsche Telekom AG.
 #
-# REDISTRIBUTION IN ANY FORM PROHIBITED WITHOUT PRIOR WRITTEN
-# CONSENT OF THE AUTHOR.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 #
 from __future__ import absolute_import, division, unicode_literals, print_function, nested_scopes
 import errno
@@ -49,9 +58,8 @@ class SSHUserPassController (ssh.ServerInterface):
 
 
 class SSHServerSession (object):
-    def __init__ (self, stream, session_arg, debug):
+    def __init__ (self, stream, unused_server, unused_extra_args, debug):
         self.stream = stream
-        self.session_arg = session_arg
         self.debug = debug
 
         self.reader_thread = None
@@ -65,16 +73,20 @@ class SSHServerSession (object):
         return "SSHServerSession(stream:{})".format(str(self.stream))
 
     def is_active (self):
-        return self.stream and self.stream.is_active()
+        with self.lock:
+            return self.stream and self.stream.is_active()
 
     def send (self, data):
-        return self.stream.send(data)
+        with self.lock:
+            stream = self.stream
+        return stream.send(data)
 
     def recv (self, rlen):
         with self.lock:
             if not self.reader_thread or not self.reader_thread.keep_running:
                 return None
-        return self.stream.recv(rlen)
+            stream = self.stream
+        return stream.recv(rlen)
 
     def close (self):
         if self.debug:
@@ -104,10 +116,14 @@ class SSHServerSession (object):
         if self.debug:
             logger.debug("%s: Reader thread exited.", str(self))
 
-    def reader_handle_message (self, data):
+    def reader_handle_data (self, data):
         # Called from reader thread after receiving a framed message
         if self.debug:
             logger.debug("%s: Reader got data: \"%s\"", str(self), str(data))
+
+    def reader_read_data (self):
+        "Called by reader thread if a evaluate false value is returned thread exits"
+        return self.recv(0xFFFFFF)
 
     def _read_message_thread (self):
         if self.debug:
@@ -122,9 +138,9 @@ class SSHServerSession (object):
                         break
                     assert stream is not None
 
-                data = stream.recv(0xFFFFFF)
+                data = self.reader_read_data()
                 if data:
-                    self.reader_handle_message(data)
+                    self.reader_handle_data(data)
                     closed = False
                 else:
                     # Client closed, never really see this 1/2 open case unfortunately.
@@ -164,13 +180,20 @@ class SSHServerSession (object):
 
 class SSHServerSocket (object):
     """An SSH socket connection from a client"""
-    def __init__ (self, server_ctl, session_class, session_args, server, newsocket, addr, debug):
-        self.session_args = session_args
+    def __init__ (self,
+                  server_ctl,
+                  session_class,
+                  extra_args,
+                  server,
+                  newsocket,
+                  addr,
+                  debug):
+        self.session_class = session_class
+        self.extra_args = extra_args
         self.server = server
         self.client_socket = newsocket
         self.client_addr = addr
         self.debug = debug
-        self.session_class = session_class
         self.server_ctl = server_ctl
         self.sessions = []
 
@@ -268,7 +291,7 @@ class SSHServerSocket (object):
                             logger.debug("%s: Got channel as None must be timeout.", str(self))
                         continue
 
-                session = self.session_class(channel, self.session_args, self.debug)
+                session = self.session_class(channel, self.server, self.extra_args, self.debug)
                 with self.lock:
                     self.sessions.append(session)
 
@@ -299,6 +322,8 @@ class SSHServer (object):
     def __init__ (self,
                   server_ctl=None,
                   server_socket_class=None,
+                  server_session_class=None,
+                  extra_args=None,
                   port=None,
                   host_key=None,
                   debug=False):
@@ -311,6 +336,11 @@ class SSHServer (object):
             server_socket_class = SSHServerSocket
         self.server_socket_class = server_socket_class
 
+        if server_session_class is None:
+            server_session_class = SSHServerSession
+        self.server_session_class = server_session_class
+
+        self.extra_args = extra_args
         self.debug = debug
         if port is None:
             port = 0
@@ -440,8 +470,8 @@ class SSHServer (object):
                     logger.debug("%s: Client accepted: %s: %s", str(self), str(client), str(addr))
                     try:
                         sock = self.server_socket_class(self.server_ctl,
-                                                        SSHServerSession,
-                                                        (self, client, addr),
+                                                        self.server_session_class,
+                                                        self.extra_args,
                                                         self,
                                                         client,
                                                         addr,
@@ -465,8 +495,6 @@ class SSHServer (object):
                 logger.error("%s: Unexpected exception: %s closing",
                              str(self),
                              str(error))
-        except:
-            logger.error("%s: Unexpected exception: %s", str(self), traceback.format_exc())
 
     def __str__ (self):
         return "SSHServer(port={})".format(self.port)
