@@ -16,7 +16,8 @@
 # limitations under the License.
 #
 from __future__ import absolute_import, division, unicode_literals, print_function, nested_scopes
-from sshutil.cmd import ShellCommand, SSHCommand
+from sshutil.cmd import SSHCommand
+
 
 def setup_module (unused):
     from sshutil.cache import setup_travis
