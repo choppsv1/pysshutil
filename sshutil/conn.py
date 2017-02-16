@@ -43,7 +43,7 @@ def shell_escape_single_quote (command):
 
 class SSHConnection (object):
     """A connection to an SSH server"""
-    def __init__ (self, host, port=22, username=None, password=None, debug=False, cache=None):
+    def __init__ (self, host, port=22, username=None, password=None, debug=False, cache=None, proxycmd=None):
         if cache is None:
             cache = g_no_cache
 
@@ -60,7 +60,7 @@ class SSHConnection (object):
 
         self.username = username
 
-        self.ssh = cache.get_ssh_socket(host, port, username, password, debug)
+        self.ssh = cache.get_ssh_socket(host, port, username, password, debug, proxycmd)
 
         # Open a session.
         try:
@@ -118,8 +118,8 @@ class SSHSession (SSHConnection):
 
 class SSHClientSession (SSHSession):
     """A client session to a host using a subsystem"""
-    def __init__ (self, host, port, subsystem, username=None, password=None, debug=False, cache=None):
-        super(SSHClientSession, self).__init__(host, port, username, password, debug, cache)
+    def __init__ (self, host, port, subsystem, username=None, password=None, debug=False, cache=None, proxycmd=None):
+        super(SSHClientSession, self).__init__(host, port, username, password, debug, cache, proxycmd)
         try:
             self.chan.invoke_subsystem(subsystem)
         except:
@@ -129,10 +129,10 @@ class SSHClientSession (SSHSession):
 
 class SSHCommandSession (SSHSession):
     """A client session to a host using a command i.e., like a remote pipe"""
-    def __init__ (self, host, port, command, username=None, password=None, debug=False, cache=None):
+    def __init__ (self, host, port, command, username=None, password=None, debug=False, cache=None, proxycmd=None):
         if cache is None:
             cache = g_cmd_cache
-        super(SSHCommandSession, self).__init__(host, port, username, password, debug, cache)
+        super(SSHCommandSession, self).__init__(host, port, username, password, debug, cache, proxycmd)
         try:
             self.chan.exec_command(command)
         except:

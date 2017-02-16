@@ -59,14 +59,17 @@ class _SSHConnectionCache (object):
                     cls.ssh_config.parse(f)
 
     @classmethod
-    def open_os_socket (cls, host, port, use_config=True, debug=False):
+    def open_os_socket (cls, host, port, use_config=True, debug=False, proxycmd=None):
         if use_config:
             cls.init_class_config()
             config = cls.ssh_config.lookup(host)
 
             # If we have a proxy command use that.
-            if 'proxycommand' in config:
-                proxy = config['proxycommand']
+            if proxycmd or 'proxycommand' in config:
+                if proxycmd:
+                    proxy = proxycmd
+                else:
+                    proxy = config['proxycommand']
                 proxy = proxy.replace('%h', host)
                 proxy = proxy.replace('%p', str(port))
                 logger.debug("Using proxy command for host %s port %s: %s",
@@ -128,8 +131,8 @@ class _SSHConnectionCache (object):
             raise
 
     @classmethod
-    def _open_ssh_socket (cls, host, port, username, password, use_config, debug):
-        ossock = cls.open_os_socket(host, port, use_config, debug)
+    def _open_ssh_socket (cls, host, port, username, password, use_config, debug, proxy):
+        ossock = cls.open_os_socket(host, port, use_config, debug, proxy)
         try:
             if debug:
                 logger.debug("Opening SSH socket to %s:%s", str(host), str(port))
@@ -222,14 +225,15 @@ class SSHNoConnectionCache (_SSHConnectionCache):
         ssh_socket.close()
         ossock.close()
 
-    def get_ssh_socket (self, host, port, username, password, debug=False):
+    def get_ssh_socket (self, host, port, username, password, debug=False, proxycmd=None):
         # True below is to use users ssh config, should this be part of get_ssh_socket API?
         ossock, sshsock = _SSHConnectionCache._open_ssh_socket(host,
                                                                port,
                                                                username,
                                                                password,
                                                                True,
-                                                               debug)
+                                                               debug,
+                                                               proxycmd)
         sshsock.os_socket = ossock
         return sshsock
 
@@ -267,9 +271,9 @@ class SSHConnectionCache (_SSHConnectionCache):
                     del self.ssh_socket_timeout[ssh_socket]
                     self._close_socket(ssh_socket, debug)
 
-    def get_ssh_socket (self, host, port, username, password, debug):
+    def get_ssh_socket (self, host, port, username, password, debug, proxycmd=None):
         # Return an open ssh socket if we have one.
-        key = "{}:{}@{}".format(host, port, username)
+        key = "{}:{}@{}:{}".format(host, port, username, proxycmd)
         with self.ssh_sockets_lock:
             if debug:
                 logger.debug("Searching for \"%s\" in open ssh socket cache", key)
@@ -313,7 +317,8 @@ class SSHConnectionCache (_SSHConnectionCache):
                                                                    username,
                                                                    password,
                                                                    True,
-                                                                   debug)
+                                                                   debug,
+                                                                   proxycmd)
 
             if key not in self.ssh_sockets:
                 self.ssh_sockets[key] = []
