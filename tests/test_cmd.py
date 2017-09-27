@@ -25,7 +25,8 @@ def setup_module (unused):
 
 
 def test_ssh_command ():
-    cmd = SSHCommand("ls -d /etc", "localhost", debug=True)
+    # cmd = SSHCommand("ls -d /etc", "localhost", debug=True)
+    cmd = SSHCommand("ls -d /etc", "localhost")
     print(cmd.run())
 
 
