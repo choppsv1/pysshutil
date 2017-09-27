@@ -101,6 +101,9 @@ class SSHCommand (conn.SSHConnection):
         >>> print(error, end="")
         grep: doesnt-exist: No such file or directory
         """
+        if self.debug:
+            logger.debug("RUNNING: %s", str(self.command))
+
         try:
             if isinstance(self, SSHPTYCommand):
                 self._get_pty()
@@ -113,6 +116,11 @@ class SSHCommand (conn.SSHConnection):
 
             return (self.exit_code, self.output, self.error_output)
         finally:
+            if self.debug:
+                logger.debug("RESULT: exit: %s stdout: '%s' stderr: '%s'",
+                             str(self.exit_code),
+                             str(self.output),
+                             str(self.error_output))
             self.close()
 
     def run_stderr (self):
@@ -275,6 +283,8 @@ class ShellCommand (object):
         grep: doesnt-exist: No such file or directory
         """
         try:
+            if self.debug:
+                logger.debug("RUNNING: %s", str(self.command_list))
             pipe = subprocess.Popen(self.command_list,
                                     stdout=subprocess.PIPE,
                                     stderr=subprocess.PIPE,
@@ -283,8 +293,18 @@ class ShellCommand (object):
             self.output = output.decode('utf-8')
             self.error_output = error_output.decode('utf-8')
             self.exit_code = pipe.returncode
-        except OSError:
+        except OSError as error:
+            logger.debug("RESULT: OSError: %s stdout: '%s' stderr: '%s'",
+                         str(error),
+                         str(self.output),
+                         str(self.error_output))
             self.exit_code = 1
+        else:
+            if self.debug:
+                logger.debug("RESULT: exit: %s stdout: '%s' stderr: '%s'",
+                             str(self.exit_code),
+                             str(self.output),
+                             str(self.error_output))
 
         return (self.exit_code, self.output, self.error_output)
 
