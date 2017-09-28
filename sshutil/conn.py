@@ -93,7 +93,7 @@ class SSHConnection (object):
 class SSHSession (SSHConnection):
     def send (self, chunk):
         assert self.chan is not None
-        self.chan.send(chunk)
+        return self.chan.send(chunk)
 
     def sendall (self, chunk):
         assert self.chan is not None

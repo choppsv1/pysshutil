@@ -120,7 +120,6 @@ class SSHCommand (conn.SSHConnection):
                              str(self.exit_code),
                              str(self.output),
                              str(self.error_output))
-
             return (self.exit_code, self.output, self.error_output)
         finally:
             self.close()
