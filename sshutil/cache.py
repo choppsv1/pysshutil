@@ -162,11 +162,13 @@ class _SSHConnectionCache (object):
             #     pass
 
             logger.debug("Trying to authenticate with username: %s", str(username))
+            autherr = ssh.AuthenticationException("No authentication methods worked")
             if not sshsock.is_authenticated() and password is not None:
                 try:
                     sshsock.auth_password(username, password, event, False)
                 except (ssh.AuthenticationException, ssh.BadAuthenticationType) as error:
                     logger.debug("Password auth failed (cont): %s: %s", str(username), str(error))
+                    autherr = error
                 else:
                     if not sshsock.is_authenticated():
                         logger.warning("Password auth failed no error (cont) for %s",
@@ -177,6 +179,7 @@ class _SSHConnectionCache (object):
                     sshsock.auth_publickey(username, passkey, event)
                 except ssh.AuthenticationException as error:
                     logger.debug("Pubkey auth failed (cont): %s", str(error))
+                    autherr = error
                 else:
                     if not sshsock.is_authenticated():
                         logger.warning("Pubkey auth failed no error (cont)")
@@ -197,7 +200,8 @@ class _SSHConnectionCache (object):
                             raise
                         logger.debug("Pubkey auth failed (cont): %s", str(error))
                         # Try next key
-            assert sshsock.is_authenticated()
+            if not sshsock.is_authenticated():
+                raise autherr
 
             # nextauth (rval from above) would be a secondary authentication e.g., google authenticator.
 
