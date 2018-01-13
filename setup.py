@@ -13,24 +13,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import os
 from setuptools import setup
 
-required = [
-    "paramiko>=1.10.1",
-]
-
-
-def read(fname):
-    return open(os.path.join(os.path.dirname(__file__), fname)).read()
-
-setup (name='sshutil',
-       version='1.1.0',
-       description='Python SSH Utility Library',
-       long_description=read("README.rst"),
-       author='Christian E. Hopps',
-       author_email='chopps@gmail.com',
-       license='Apache License, Version 2.0',
-       install_requires=required,
-       url='https://github.com/choppsv1/pysshutil',
-       packages=['sshutil'])
+setup(
+    setup_requires=['pbr>=1.8'],
+    pbr=True)
