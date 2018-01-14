@@ -10,9 +10,13 @@
 *.egg-info/
 *.pyc
 *.so
+*.cov2emacs.log
 EGG-INFO/
 GPATH
 GRTAGS
 GTAGS
 build/
 dist/
+
+# sphinx
+doc/source/api/

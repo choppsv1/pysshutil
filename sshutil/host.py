@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-#
+# -*- coding: utf-8 eval: (yapf-mode 1) -*-
 #
 # Copyright (c) 2015, Deutsche Telekom AG.
 #
@@ -25,28 +25,57 @@ __version__ = '1.0'
 __docformat__ = "restructuredtext en"
 
 
-class Host (object):
-    def __init__ (self, server=None, port=22, cwd=None, username=None, password=None, debug=False):
+class Host(object):
+    """A Host object is either local (shell) or remote host (ssh) and provides easy access to the given
+    host for running commands etc.
+    """
+
+    def __init__(self,
+                 server=None,
+                 port=22,
+                 cwd=None,
+                 username=None,
+                 password=None,
+                 debug=False,
+                 cache=None,
+                 proxycmd=None):
+        """Get a 'connection' to a host (local or remote)
+
+        :param server: The host to execute commands on `None` for using the local shell.
+        :param port: The ssh port to use.
+        :param cwd: The directory commands should execute from.
+        :param username: The username to authenticate with if `None` getpass.get_user() is used.
+        :param password: The password or public key to authenticate with.
+                         If `None` given will also try using an SSH agent.
+        :type password: str or ssh.PKey
+        :param debug: True to enable debug level logging.
+        :param cache: A connection cache to use.
+        :type cache: SSHConnectionCache
+        :param proxycmd: Proxy command to use when making the ssh connection.
         """
-        A host object is either local or remote and provides easy access
-        to the given local or remote host
-        """
+
         self.sftp = None
         self.sftp_session = None
         self.cwd = cwd
         if server:
-            self.cmd_class = functools.partial(SSHCommand,
-                                               host=server,
-                                               port=port,
-                                               username=username,
-                                               password=password,
-                                               debug=debug)
-            self.session_class = functools.partial(SSHClientSession,
-                                                   host=server,
-                                                   port=port,
-                                                   username=username,
-                                                   password=password,
-                                                   debug=debug)
+            self.cmd_class = functools.partial(
+                SSHCommand,
+                host=server,
+                port=port,
+                username=username,
+                password=password,
+                debug=debug,
+                cache=cache,
+                proxycmd=proxycmd)
+            self.session_class = functools.partial(
+                SSHClientSession,
+                host=server,
+                port=port,
+                username=username,
+                password=password,
+                debug=debug,
+                cache=cache,
+                proxycmd=proxycmd)
         else:
             self.cmd_class = functools.partial(ShellCommand, debug=debug)
             self.session_class = None
@@ -56,7 +85,7 @@ class Host (object):
         if not self.cwd:
             self.cwd = self.cmd_class("pwd").run().strip()
 
-    def _get_sftp (self):
+    def _get_sftp(self):
         if self.sftp is None:
             self.sftp_session = self.session_class(subsystem="sftp")
             try:
@@ -69,12 +98,14 @@ class Host (object):
             self.sftp.chdir(self.cwd)
         return self.sftp
 
-    def _get_cmd (self, command):
+    def _get_cmd(self, command):
         return "bash -c 'cd {} && {}'".format(self.cwd, shell_escape_single_quote(command))
 
-    def run_status_stderr (self, command):
-        """
-        Run a command return exit code, stdout and stderr.
+    def run_status_stderr(self, command):
+        """Run the command returning exit code, stdout and stderr.
+
+        :return: (returncode, stdout, stderr)
+
         >>> host = Host()
         >>> status, output, error = host.run_status_stderr("ls -d /etc")
         >>> status
@@ -92,16 +123,31 @@ class Host (object):
         """
         return self.cmd_class(self._get_cmd(command)).run_status_stderr()
 
-    def run_status (self, command):
+    def run_status(self, command):
+        """Run a command, return exitcode and stdout.
+
+        :return: (status, stdout)
+        """
         return self.cmd_class(self._get_cmd(command)).run_status()
 
-    def run_stderr (self, command):
+    def run_stderr(self, command):
+        """Run a command, return stdout and stderr,
+
+        :return: (stdout, stderr)
+        :raises: CalledProcessError
+        """
         return self.cmd_class(self._get_cmd(command)).run_stderr()
 
-    def run (self, command):
+    def run(self, command):
+        """Run a command, return stdout.
+
+        :return: stdout
+        :raises: CalledProcessError
+        """
+
         return self.cmd_class(self._get_cmd(command)).run()
 
-    def copy_to (self, localfile, remotefile):
+    def copy_to(self, localfile, remotefile):
         if self.session_class:
             sftp = self._get_sftp()
             sftp.put(localfile, remotefile)
