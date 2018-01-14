@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-#
+# -*- coding: utf-8 eval: (yapf-mode 1) -*-
 #
 # December 14 2016, Christian Hopps <chopps@gmail.com>
 #
@@ -26,69 +26,73 @@ import threading
 import traceback
 import paramiko as ssh
 
-
 logger = logging.getLogger(__name__)
 
 
-class SSHUserPassController (ssh.ServerInterface):
-    def __init__ (self, username=None, password=None):
+class SSHUserPassController(ssh.ServerInterface):
+    def __init__(self, username=None, password=None):
         self.username = username
         self.password = password
         self.event = threading.Event()
 
-    def get_allowed_auths (self, unused_username):
+    def get_allowed_auths(self, username):
+        del username  # unused
         return "password"
 
-    def check_auth_none (self, unused_username):
+    def check_auth_none(self, username):
+        del username  # unused
         return ssh.AUTH_FAILED
 
-    def check_auth_password (self, username, password):
+    def check_auth_password(self, username, password):
         if self.username == username and self.password == password:
             return ssh.AUTH_SUCCESSFUL
         return ssh.AUTH_FAILED
 
-    def check_channel_request (self, kind, unused_channel):
+    def check_channel_request(self, kind, chanid):
+        del chanid  # unused
         if kind == "session":
             return ssh.OPEN_SUCCEEDED
         return ssh.OPEN_FAILED_ADMINISTRATIVELY_PROHIBITED
 
-    def check_channel_subsystem_request (self, channel, name):
+    def check_channel_subsystem_request(self, channel, name):
         self.event.set()
         return name == "netconf"
 
 
-class SSHServerSession (object):
-    def __init__ (self, stream, unused_server, unused_extra_args, debug):
+class SSHServerSession(object):
+    def __init__(self, stream, server, extra_args, debug):
+        del server  # unused
+        del extra_args  # unused
         self.stream = stream
         self.debug = debug
 
         self.reader_thread = None
         self.lock = threading.Lock()
 
-    def __del__ (self):
+    def __del__(self):
         if hasattr(self, "stream") and self.stream is not None:
             self.close()
 
-    def __str__ (self):
+    def __str__(self):
         return "SSHServerSession(stream:{})".format(str(self.stream))
 
-    def is_active (self):
+    def is_active(self):
         with self.lock:
             return self.stream and self.stream.is_active()
 
-    def send (self, data):
+    def send(self, data):
         with self.lock:
             stream = self.stream
         return stream.send(data)
 
-    def recv (self, rlen):
+    def recv(self, rlen):
         with self.lock:
             if not self.reader_thread or not self.reader_thread.keep_running:
                 return None
             stream = self.stream
         return stream.recv(rlen)
 
-    def close (self):
+    def close(self):
         if self.debug:
             logger.debug("%s: Closing.", str(self))
 
@@ -108,24 +112,23 @@ class SSHServerSession (object):
                 stream.close()
             except EOFError:
                 if self.debug:
-                    logger.debug("%s: XXX close: channel's transport is closed",
-                                 str(self))
+                    logger.debug("%s: XXX close: channel's transport is closed", str(self))
 
-    def reader_exits (self):
+    def reader_exits(self):
         # Called from reader thread when our reader thread exits
         if self.debug:
             logger.debug("%s: Reader thread exited.", str(self))
 
-    def reader_handle_data (self, data):
+    def reader_handle_data(self, data):
         # Called from reader thread after receiving a framed message
         if self.debug:
             logger.debug("%s: Reader got data: \"%s\"", str(self), str(data))
 
-    def reader_read_data (self):
+    def reader_read_data(self):
         "Called by reader thread if a evaluate false value is returned thread exits"
         return self.recv(0xFFFFFF)
 
-    def _read_message_thread (self):
+    def _read_message_thread(self):
         if self.debug:
             logger.debug("Starting reader thread.")
 
@@ -164,30 +167,23 @@ class SSHServerSession (object):
             with self.lock:
                 keep_running = reader_thread.keep_running
             if keep_running:
-                logger.error("Unexpected exception in reader thread [disconnecting+exiting]: %s: %s",
-                             str(error),
-                             traceback.format_exc())
+                logger.error(
+                    "Unexpected exception in reader thread [disconnecting+exiting]: %s: %s",
+                    str(error), traceback.format_exc())
                 self.close()
             else:
                 # XXX might want to catch errors due to disconnect and not re-raise
-                logger.debug("Exception in reader thread [exiting]: %s: %s",
-                             str(error),
+                logger.debug("Exception in reader thread [exiting]: %s: %s", str(error),
                              traceback.format_exc())
         finally:
             # If we are exiting the read thread we close the session.
             self.reader_exits()
 
 
-class SSHServerSocket (object):
+class SSHServerSocket(object):
     """An SSH socket connection from a client"""
-    def __init__ (self,
-                  server_ctl,
-                  session_class,
-                  extra_args,
-                  server,
-                  newsocket,
-                  addr,
-                  debug):
+
+    def __init__(self, server_ctl, session_class, extra_args, server, newsocket, addr, debug):
         self.session_class = session_class
         self.extra_args = extra_args
         self.server = server
@@ -212,16 +208,15 @@ class SSHServerSocket (object):
 
         self.lock = threading.Lock()
         self.running = True
-        self.thread = threading.Thread(None,
-                                       self._accept_chan_thread,
-                                       name="SSHAcceptThread")
+        self.thread = threading.Thread(
+            None, target=self._accept_chan_thread, name="SSHAcceptThread")
         self.thread.daemon = True
         self.thread.start()
 
-    def __str__ (self):
+    def __str__(self):
         return "SSHServerSocket(client: {})".format(self.client_addr)
 
-    def close (self):
+    def close(self):
 
         with self.lock:
             logger.debug("%s: close socket", str(self))
@@ -239,9 +234,8 @@ class SSHServerSocket (object):
                 self.ssh = None
 
             if self.client_socket:
-                logger.debug("%s: close closing client socket %s",
-                             str(self),
-                             str(self.client_socket))
+                logger.debug("%s: close closing client socket %s", str(self), str(
+                    self.client_socket))
                 self.client_socket.close()
                 self.client_socket = None
 
@@ -251,7 +245,7 @@ class SSHServerSocket (object):
         self.thread.join()
         logger.debug("%s: close *** joined *** thread", str(self))
 
-    def _accept_chan_thread (self):
+    def _accept_chan_thread(self):
         try:
             while True:
                 with self.lock:
@@ -272,8 +266,7 @@ class SSHServerSocket (object):
                 with self.lock:
                     if not self.running:
                         if channel:
-                            logger.debug("%s: Closing channel after shutdown %s",
-                                         str(self),
+                            logger.debug("%s: Closing channel after shutdown %s", str(self),
                                          str(channel))
                             channel.close()
                         logger.debug("%s: Exiting thread", str(self))
@@ -297,14 +290,10 @@ class SSHServerSocket (object):
 
         except Exception as error:
             if self.debug:
-                logger.error("%s: Unexpected exception: %s: %s",
-                             str(self),
-                             str(error),
+                logger.error("%s: Unexpected exception: %s: %s", str(self), str(error),
                              traceback.format_exc())
             else:
-                logger.error("%s: Unexpected exception: %s closing",
-                             str(self),
-                             str(error))
+                logger.error("%s: Unexpected exception: %s closing", str(self), str(error))
 
             self.client_socket.close()
             self.client_socket = None
@@ -314,19 +303,20 @@ class SSHServerSocket (object):
             raise
 
 
-class SSHServer (object):
+class SSHServer(object):
     """An ssh server"""
-    def __del__ (self):
+
+    def __del__(self):
         logger.error("Deleting %s", str(self))
 
-    def __init__ (self,
-                  server_ctl=None,
-                  server_socket_class=None,
-                  server_session_class=None,
-                  extra_args=None,
-                  port=None,
-                  host_key=None,
-                  debug=False):
+    def __init__(self,
+                 server_ctl=None,
+                 server_socket_class=None,
+                 server_session_class=None,
+                 extra_args=None,
+                 port=None,
+                 host_key=None,
+                 debug=False):
 
         if server_ctl is None:
             server_ctl = SSHUserPassController()
@@ -352,8 +342,7 @@ class SSHServer (object):
             assert os.path.exists(host_key)
             self.host_key = ssh.RSAKey.from_private_key_file(host_key)
         else:
-            for keypath in [ "/etc/ssh/ssh_host_rsa_key",
-                             "/etc/ssh/ssh_host_dsa_key"]:
+            for keypath in ["/etc/ssh/ssh_host_rsa_key", "/etc/ssh/ssh_host_dsa_key"]:
                 # XXX check we have access
                 if os.path.exists(keypath):
                     self.host_key = ssh.RSAKey.from_private_key_file(keypath)
@@ -361,7 +350,7 @@ class SSHServer (object):
 
         # Bind first to IPv6, if the OS supports binding per AF then the IPv4
         # will succeed, otherwise the IPv6 will support both AF.
-        for pname, host, proto in [ ("IPv6", '::', socket.AF_INET6), ("IPv4", '', socket.AF_INET) ]:
+        for pname, host, proto in [("IPv6", '::', socket.AF_INET6), ("IPv4", '', socket.AF_INET)]:
             protosocket = socket.socket(proto, socket.SOCK_STREAM)
             protosocket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             if self.debug:
@@ -397,30 +386,31 @@ class SSHServer (object):
             self.lock = threading.Lock()
             self.sockets = []
 
-            self.thread = threading.Thread(None,
-                                           self._accept_socket_thread,
-                                           name="SSHAcceptThread " + pname,
-                                           args=[protosocket])
+            self.thread = threading.Thread(
+                None,
+                self._accept_socket_thread,
+                name="SSHAcceptThread " + pname,
+                args=[protosocket])
             self.thread.daemon = True
             self.thread.start()
 
-    def close (self):
+    def close(self):
         with self.lock:
             logger.info("Sending close signal to accept socket")
             assert self.thread.is_alive()
             self.close_wsocket.send(b"!")
 
-    def join (self):
+    def join(self):
         "Wait on server to terminate"
         assert self.thread
         self.thread.join()
         self.thread = None
 
-    def remove_socket (self, serversocket):
+    def remove_socket(self, serversocket):
         with self.lock:
             self.sockets.remove(serversocket)
 
-    def _accept_socket_thread (self, proto_sock):
+    def _accept_socket_thread(self, proto_sock):
         """Call from within a thread to accept connections."""
         try:
             while True:
@@ -449,15 +439,12 @@ class SSHServer (object):
 
                     # Close our listening socket.
                     if self.debug:
-                        logger.debug("%s: closing proto socket %s",
-                                     str(self),
-                                     str(proto_sock))
+                        logger.debug("%s: closing proto socket %s", str(self), str(proto_sock))
                     proto_sock.close()
 
                     # Close our closing socket.
                     if self.debug:
-                        logger.debug("%s: closing close socket %s",
-                                     str(self),
+                        logger.debug("%s: closing close socket %s", str(self),
                                      str(self.close_rsocket))
                     self.close_rsocket.close()
 
@@ -468,34 +455,23 @@ class SSHServer (object):
                     client, addr = proto_sock.accept()
                     logger.debug("%s: Client accepted: %s: %s", str(self), str(client), str(addr))
                     try:
-                        sock = self.server_socket_class(self.server_ctl,
-                                                        self.server_session_class,
-                                                        self.extra_args,
-                                                        self,
-                                                        client,
-                                                        addr,
+                        sock = self.server_socket_class(self.server_ctl, self.server_session_class,
+                                                        self.extra_args, self, client, addr,
                                                         self.debug)
                         with self.lock:
                             self.sockets.append(sock)
                     except ssh.AuthenticationException as error:
-                        logger.debug("%s: Client auth failed: %s: %s: %s",
-                                     str(self),
-                                     str(client),
-                                     str(addr),
-                                     str(error))
+                        logger.debug("%s: Client auth failed: %s: %s: %s", str(self), str(client),
+                                     str(addr), str(error))
 
         except Exception as error:
             if self.debug:
-                logger.error("%s: Unexpected exception: %s: %s",
-                             str(self),
-                             str(error),
+                logger.error("%s: Unexpected exception: %s: %s", str(self), str(error),
                              traceback.format_exc())
             else:
-                logger.error("%s: Unexpected exception: %s closing",
-                             str(self),
-                             str(error))
+                logger.error("%s: Unexpected exception: %s closing", str(self), str(error))
 
-    def __str__ (self):
+    def __str__(self):
         return "SSHServer(port={})".format(self.port)
 
 

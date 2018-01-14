@@ -1,7 +1,9 @@
 # -*- coding: utf-8 eval: (yapf-mode 1) -*-
 #
-# Copyright (c) 2015 by Christian E. Hopps.
-# All rights reserved.
+# January 14 2018, Christian E. Hopps <chopps@gmail.com>
+#
+# Copyright (c) 2018, Deutsche Telekom AG.
+# All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -17,11 +19,10 @@
 #
 from __future__ import absolute_import, division, unicode_literals, print_function, nested_scopes
 import pytest
-
 from sshutil.cache import SSHConnectionCache, SSHNoConnectionCache
-from sshutil.cmd import SSHCommand, SSHPTYCommand
+from sshutil.conn import SSHCommandSession
 
-from testfunc import _init_variations
+proxy = "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null localhost /bin/nc %h %p"
 
 
 def setup_module(module):
@@ -30,29 +31,24 @@ def setup_module(module):
     _setup_travis()
 
 
-proxy = "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null localhost /bin/nc %h %p"
-
-
 @pytest.mark.parametrize(
     "cache",
     [SSHConnectionCache("SSH Session cache"),
      SSHNoConnectionCache("SSH Session no cache"), None])
 @pytest.mark.parametrize("proxycmd", [None, proxy])
 @pytest.mark.parametrize("debug", [False, True])
-def test_ssh_command(cache, proxycmd, debug):
-    _init_variations(SSHCommand, debug, cache, proxycmd)
+def test_command_session(cache, proxycmd, debug):
+    session = SSHCommandSession("localhost", 22, "cat", debug=debug, cache=cache, proxycmd=proxycmd)
+    s = "foobar\n"
+    session.sendall(s)
+    s2 = session.recv(len(s)).decode('utf-8')
+    assert s == s2
+    session.chan.shutdown_write()
+    status = session.recv_exit_status()
+    assert status == 0
 
 
-# Failing for some reason
-# @pytest.mark.parametrize(
-#     "cache",
-#     [SSHConnectionCache("SSH Session cache"),
-#      SSHNoConnectionCache("SSH Session no cache"), None])
-# @pytest.mark.parametrize("proxycmd", [None, proxy])
-# @pytest.mark.parametrize("debug", [False, True])
-# def test_pty_command(cache, proxycmd, debug):
-#     _init_variations(SSHPTYCommand, debug, cache, proxycmd)
-
-__author__ = 'Christian Hopps'
-__date__ = 'September 26 2015'
+__author__ = 'Christian E. Hopps'
+__date__ = 'January 14 2018'
+__version__ = '1.0'
 __docformat__ = "restructuredtext en"

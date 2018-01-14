@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-#
+# -*- coding: utf-8 eval: (yapf-mode 1) -*-
 #
 # Copyright (c) 2015, Deutsche Telekom AG.
 #
@@ -17,15 +17,19 @@
 from __future__ import absolute_import, division, unicode_literals, print_function, nested_scopes
 import getpass
 import logging
-from .cache import SSHConnectionCache, SSHNoConnectionCache
+
+from . import g_cache
+
+__author__ = 'Christian Hopps'
+__version__ = '1.0'
+__date__ = 'January 14 2016'
+__docformat__ = "restructuredtext en"
 
 MAXSSHBUF = 16 * 1024
-g_no_cache = SSHNoConnectionCache()
-g_cmd_cache = SSHConnectionCache("SSH Command Cache")
 logger = logging.getLogger(__name__)
 
 
-def shell_escape_single_quote (command):
+def shell_escape_single_quote(command):
     """Escape single quotes for use in a shell single quoted string
     Explanation:
 
@@ -41,11 +45,19 @@ def shell_escape_single_quote (command):
     return command.replace("'", "'\"'\"'")
 
 
-class SSHConnection (object):
+class SSHConnection(object):
     """A connection to an SSH server"""
-    def __init__ (self, host, port=22, username=None, password=None, debug=False, cache=None, proxycmd=None):
+
+    def __init__(self,
+                 host,
+                 port=22,
+                 username=None,
+                 password=None,
+                 debug=False,
+                 cache=None,
+                 proxycmd=None):
         if cache is None:
-            cache = g_no_cache
+            cache = g_cache
 
         self.host = host
         self.port = port
@@ -71,11 +83,11 @@ class SSHConnection (object):
             self.close()
             raise
 
-    def __del__ (self):
+    def __del__(self):
         # Make sure we get rid of the cached reference to the open ssh socket
         self.close()
 
-    def close (self):
+    def close(self):
         if hasattr(self, "chan") and self.chan:
             if self.debug:
                 logger.debug("Closing SSH channel on socket (%s:%s)", self.host, str(self.port))
@@ -86,40 +98,64 @@ class SSHConnection (object):
             self.ssh = None
             self.cache.release_ssh_socket(tmp, self.debug)
 
-    def is_active (self):
+    def is_active(self):
         return self.chan and self.ssh and self.ssh.is_active()
 
 
-class SSHSession (SSHConnection):
-    def send (self, chunk):
+class SSHSession(SSHConnection):
+    def send(self, chunk):
         assert self.chan is not None
         return self.chan.send(chunk)
 
-    def sendall (self, chunk):
+    def sendall(self, chunk):
         assert self.chan is not None
         self.chan.sendall(chunk)
 
-    def recv (self, size=MAXSSHBUF):
+    def recv(self, size=MAXSSHBUF):
         assert self.chan is not None
         return self.chan.recv(size)
 
-    def recv_ready (self):
+    def recv_ready(self):
         assert self.chan is not None
         return self.chan.recv_ready()
 
-    def recv_stderr (self, size=MAXSSHBUF):
+    def recv_stderr(self, size=MAXSSHBUF):
         assert self.chan is not None
         return self.chan.recv_stderr(size)
 
-    def recv_stderr_ready (self):
+    def recv_stderr_ready(self):
         assert self.chan is not None
         return self.chan.recv_stderr_ready()
 
 
-class SSHClientSession (SSHSession):
-    """A client session to a host using a subsystem"""
-    def __init__ (self, host, port, subsystem, username=None, password=None, debug=False, cache=None, proxycmd=None):
-        super(SSHClientSession, self).__init__(host, port, username, password, debug, cache, proxycmd)
+class SSHClientSession(SSHSession):
+    """A client session to a host using a subsystem."""
+
+    def __init__(self,
+                 host,
+                 port,
+                 subsystem,
+                 username=None,
+                 password=None,
+                 debug=False,
+                 cache=None,
+                 proxycmd=None):
+        """Opens a client session to a host using a given subsystem.
+
+        :param host: The host to execute the command on.
+        :param port: The ssh port to use.
+        :param subsystem: The subsystem to open over the SSH channel.
+        :param username: The username to authenticate with if `None` getpass.get_user() is used.
+        :param password: The password or public key to authenticate with.
+                         If `None` given will also try using an SSH agent.
+        :type password: str or ssh.PKey
+        :param debug: True to enable debug level logging.
+        :param cache: A connection cache to use.
+        :type cache: SSHConnectionCache
+        :param proxycmd: Proxy command to use when making the ssh connection.
+        """
+        super(SSHClientSession, self).__init__(host, port, username, password, debug, cache,
+                                               proxycmd)
         try:
             self.chan.invoke_subsystem(subsystem)
         except:
@@ -127,19 +163,43 @@ class SSHClientSession (SSHSession):
             raise
 
 
-class SSHCommandSession (SSHSession):
-    """A client session to a host using a command i.e., like a remote pipe"""
-    def __init__ (self, host, port, command, username=None, password=None, debug=False, cache=None, proxycmd=None):
-        if cache is None:
-            cache = g_cmd_cache
-        super(SSHCommandSession, self).__init__(host, port, username, password, debug, cache, proxycmd)
+class SSHCommandSession(SSHSession):
+    """A client session to a host using a command i.e., like a remote pipe
+
+    Objects of this class are useful for long running commands. For run-to-completion commands
+    SSHCommand should be used.
+    """
+
+    def __init__(self,
+                 host,
+                 port,
+                 command,
+                 username=None,
+                 password=None,
+                 debug=False,
+                 cache=None,
+                 proxycmd=None):
+        """Open a client session to a host using a command i.e., like a remote pipe
+
+        :param host: The host to execute the command on.
+        :param port: The ssh port to use.
+        :param command: The shell command to execute.
+        :param username: The username to authenticate with if `None` getpass.get_user() is used.
+        :param password: The password or public key to authenticate with.
+                         If `None` given will also try using an SSH agent.
+        :type password: str or ssh.PKey
+        :param debug: True to enable debug level logging.
+        :param cache: A connection cache to use.
+        :type cache: SSHConnectionCache
+        :param proxycmd: Proxy command to use when making the ssh connection.
+        """
+        super(SSHCommandSession, self).__init__(host, port, username, password, debug, cache,
+                                                proxycmd)
         try:
             self.chan.exec_command(command)
         except:
             self.close()
             raise
 
-
-__author__ = 'Christian Hopps'
-__version__ = '1.0'
-__docformat__ = "restructuredtext en"
+    def recv_exit_status(self):
+        return self.chan.recv_exit_status()
