@@ -8,7 +8,9 @@ install:
 - pip install -r test_requirements.txt
 - python setup.py develop
 script:
-- py.test tests --doctest-modules sshutil
+- coverage run -m py.test
+after_succes:
+- coveralls
 deploy:
   provider: pypi
   user: choppsv1

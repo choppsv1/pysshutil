@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-#
+# -*- coding: utf-8 eval: (yapf-mode 1) -*-
 #
 # December 14 2016, Christian Hopps <chopps@gmail.com>
 #
@@ -25,31 +25,40 @@ import threading
 import traceback
 import paramiko as ssh
 
+__author__ = 'Christian Hopps'
+__date__ = 'December 14 2016'
+__docformat__ = "restructuredtext en"
+
 logger = logging.getLogger(__name__)
 
 # Used by travis-ci testing
-private_key = None
+_private_key = None
 
 
-def socket_is_remote_closed (sock):
-    rfds, unused, unused = select.select([sock], [], [], 0)
+def _socket_is_remote_closed(sock):
+    try:
+        rfds, unused, unused = select.select([sock], [], [], 0)
+    except TypeError:
+        return sock.closed
+
     try:
         if sock in rfds:
             buf = sock.recv(1, socket.MSG_PEEK)
-            if len(buf) == 0:
+            if not buf:
                 logger.debug("****** read 0 on peek assuming closed")
                 return True
         return False
     except Exception as error:
-        logger.debug("***** GOT EXCEPTION on read(PEEK) must be closed: %s", str(error))
+        logger.debug("***** GOT EXCEPTION on read(PEEK) must be closed: sock: %s: %s", str(sock),
+                     str(error))
         return True
 
 
-class _SSHConnectionCache (object):
+class _SSHConnectionCache(object):
     ssh_config = None
 
     @classmethod
-    def init_class_config (cls):
+    def init_class_config(cls):
         # XXX do we want to initialize this elsewhere?
         if cls.ssh_config is None:
             cls.ssh_config = ssh.config.SSHConfig()
@@ -59,7 +68,7 @@ class _SSHConnectionCache (object):
                     cls.ssh_config.parse(f)
 
     @classmethod
-    def open_os_socket (cls, host, port, use_config=True, debug=False, proxycmd=None):
+    def open_os_socket(cls, host, port, use_config=True, debug=False, proxycmd=None):
         if use_config:
             cls.init_class_config()
             config = cls.ssh_config.lookup(host)
@@ -72,10 +81,7 @@ class _SSHConnectionCache (object):
                     proxy = config['proxycommand']
                 proxy = proxy.replace('%h', host)
                 proxy = proxy.replace('%p', str(port))
-                logger.debug("Using proxy command for host %s port %s: %s",
-                             host,
-                             str(port),
-                             proxy)
+                logger.debug("Using proxy command for host %s port %s: %s", host, str(port), proxy)
                 return ssh.ProxyCommand(proxy)
 
             if 'port' in config:
@@ -89,8 +95,7 @@ class _SSHConnectionCache (object):
             if 'port' in config:
                 if port != 22 and port != newport:
                     # XXX should we just never do this?
-                    logger.warning("Remaping non-std ssh port %d using config to port %d",
-                                   port,
+                    logger.warning("Remaping non-std ssh port %d using config to port %d", port,
                                    newport)
                 port = newport
 
@@ -101,16 +106,14 @@ class _SSHConnectionCache (object):
         attempt = 0
         try:
             error = None
-            for addrinfo in socket.getaddrinfo(host,
-                                               port,
-                                               socket.AF_UNSPEC,
-                                               socket.SOCK_STREAM):
+            for addrinfo in socket.getaddrinfo(host, port, socket.AF_UNSPEC, socket.SOCK_STREAM):
                 af, socktype, proto, unused_name, sa = addrinfo
                 try:
                     ossock = socket.socket(af, socktype, proto)
                     ossock.connect(sa)
                     if attempt:
-                        logger.debug("Succeeded after %s attempts to : %s", str(attempt), str(addrinfo))
+                        logger.debug("Succeeded after %s attempts to : %s", str(attempt),
+                                     str(addrinfo))
                     return ossock
                 except socket.error as ex:
                     logger.debug("Got socket error connecting to: %s: %s", str(addrinfo), str(ex))
@@ -118,20 +121,19 @@ class _SSHConnectionCache (object):
                     error = ex
                     continue
             if error is not None:
-                logger.debug("Got error connecting to: %s: %s (no addr)",
-                             str(addrinfo),                 # pylint: disable=W0631
-                             str(error))
-                raise error                                 # pylint: disable=E0702
+                logger.debug(
+                    "Got error connecting to: %s: %s (no addr)",
+                    str(addrinfo),  # pylint: disable=W0631
+                    str(error))
+                raise error  # pylint: disable=E0702
             raise Exception("Couldn't connect to any resolution for {}:{}".format(host, port))
         except Exception as ex:
-            logger.error("Got unexpected socket error connecting to: %s:%s: %s",
-                         str(host),
-                         str(port),
-                         str(ex))
+            logger.error("Got unexpected socket error connecting to: %s:%s: %s", str(host),
+                         str(port), str(ex))
             raise
 
     @classmethod
-    def _open_ssh_socket (cls, host, port, username, password, use_config, debug, proxy):
+    def _open_ssh_socket(cls, host, port, username, password, use_config, debug, proxy):
         ossock = cls.open_os_socket(host, port, use_config, debug, proxy)
         try:
             if debug:
@@ -162,7 +164,7 @@ class _SSHConnectionCache (object):
             #     pass
 
             logger.debug("Trying to authenticate with username: %s", str(username))
-            autherr = ssh.AuthenticationException("No authentication methods worked")
+            autherr = ("No authentication methods worked")
             if not sshsock.is_authenticated() and password is not None:
                 try:
                     sshsock.auth_password(username, password, event, False)
@@ -171,8 +173,7 @@ class _SSHConnectionCache (object):
                     autherr = error
                 else:
                     if not sshsock.is_authenticated():
-                        logger.warning("Password auth failed no error (cont) for %s",
-                                       str(username))
+                        logger.warning("Password auth failed no error (cont) for %s", str(username))
 
             if not sshsock.is_authenticated() and passkey is not None:
                 try:
@@ -186,9 +187,9 @@ class _SSHConnectionCache (object):
 
             if not sshsock.is_authenticated():
                 ssh_keys = ssh.Agent().get_keys()
-                if private_key:
+                if _private_key:
                     # Used by travis-ci
-                    ssh_keys += ( private_key, )
+                    ssh_keys += (_private_key, )
                 lastkey = len(ssh_keys) - 1
                 for idx, ssh_key in enumerate(ssh_keys):
                     if sshsock.is_authenticated():
@@ -215,38 +216,46 @@ class _SSHConnectionCache (object):
             logger.error("Authentication failed: %s", str(error))
             raise
 
-    def release_ssh_socket (self, ssh_socket, debug):
+    def release_ssh_socket(self, ssh_socket, debug):
         raise NotImplementedError("release_ssh_socket")
 
-    def get_ssh_socket (self, host, port, username, password, debug):
+    def get_ssh_socket(self, host, port, username, password, debug, proxycmd=None):
         raise NotImplementedError("get_ssh_socket")
 
 
-class SSHNoConnectionCache (_SSHConnectionCache):
+class SSHNoConnectionCache(_SSHConnectionCache):
     "Simple non-caching cache class"
-    def release_ssh_socket (self, ssh_socket, debug=False):
+
+    def __init__(self, desc=""):
+        self.desc = desc
+
+    def release_ssh_socket(self, ssh_socket, debug=False):
         ossock = ssh_socket.os_socket
         ssh_socket.close()
         ossock.close()
 
-    def get_ssh_socket (self, host, port, username, password, debug=False, proxycmd=None):
+    def get_ssh_socket(self, host, port, username, password, debug, proxycmd=None):
         # True below is to use users ssh config, should this be part of get_ssh_socket API?
-        ossock, sshsock = _SSHConnectionCache._open_ssh_socket(host,
-                                                               port,
-                                                               username,
-                                                               password,
-                                                               True,
-                                                               debug,
-                                                               proxycmd)
+        ossock, sshsock = _SSHConnectionCache._open_ssh_socket(host, port, username, password, True,
+                                                               debug, proxycmd)
         sshsock.os_socket = ossock
         return sshsock
 
-    def flush (self, debug=False):          # pylint: disable=W0613
+    def flush(self, debug=False):  # pylint: disable=W0613
         return
 
 
-class SSHConnectionCache (_SSHConnectionCache):
-    def __init__ (self, desc="", close_timeout=1, max_channels=8):
+class SSHConnectionCache(_SSHConnectionCache):
+    """An ssh connection cache.
+
+    Authenticated connections to a given host are cached for a specified amount of time before being
+    closed. This allows for connection reuse as well as avoiding re-authentication.
+
+    :param close_timeout: Amount of time to wait before closing an opened unused ssh socket.
+    :param max_channels: Maximum number of channels to open on a given ssh socket.
+    """
+
+    def __init__(self, desc="", close_timeout=1, max_channels=8):
         self.close_timeout = close_timeout
         self.max_channels = max_channels
         self.desc = desc
@@ -255,28 +264,25 @@ class SSHConnectionCache (_SSHConnectionCache):
         self.ssh_socket_timeout = {}
         self.ssh_sockets_lock = threading.Lock()
 
-    def flush (self, debug=False):
-        "Flush entries waiting for timeout."
-        # XXX change this when we create a class
-        with self.ssh_sockets_lock:
-            for key in self.ssh_sockets:
-                for entry in self.ssh_sockets[key]:
-                    ssh_socket = entry[1]
-                    try:
-                        timer = self.ssh_socket_timeout[ssh_socket]
-                    except KeyError:
-                        continue
-                    if timer is None:
-                        continue
-                    if debug:
-                        logger.debug("Flush: canceling and releasing ssh socket: %s",
-                                     str(ssh_socket))
-                    timer.cancel()
-                    del self.ssh_socket_timeout[ssh_socket]
-                    self._close_socket(ssh_socket, debug)
+    def get_ssh_socket(self, host, port, username, password, debug, proxycmd=None):
+        """Returns a socket to the given host using the given credentials.
 
-    def get_ssh_socket (self, host, port, username, password, debug, proxycmd=None):
+        If a socket has already been opened with the supplied arguments, then it will be reference
+        counted and returned. Otherwise a new socket will be opened. If `usernamee` is `None` getpass
+        will be used to obtain the current user name.
+
+        :param host: The hostname to connect to.
+        :param port: The TCP port number to connect to.
+        :param username: The username to use for authentication or `None`.
+                         If `None` then `getpass.get_user()` will be used.
+        :param password: The password/key for authentication or None.
+        :param debug: Boolean indicating if debug messages should be enabled.
+        :param proxycmd: A proxy command to use when making the ssh connection.
+        :raises: ssh.AuthenticationException
+
+        """
         # Return an open ssh socket if we have one.
+
         key = "{}:{}@{}:{}".format(host, port, username, proxycmd)
         with self.ssh_sockets_lock:
             if debug:
@@ -296,7 +302,7 @@ class SSHConnectionCache (_SSHConnectionCache):
                         logger.debug("entry is not active")
                         continue
 
-                    if socket_is_remote_closed(entry[0]):
+                    if _socket_is_remote_closed(entry[0]):
                         logger.debug("entry's socket is remote closed")
                         continue
 
@@ -306,7 +312,7 @@ class SSHConnectionCache (_SSHConnectionCache):
                         logger.debug("Incremented SSH socket use to %s", str(entry[2]))
 
                     # Cancel any timeout for closing, only really need to do this on count == 1.
-                    self.cancel_close_socket_expire(sshsock, debug)
+                    self._cancel_close_socket_expire(sshsock, debug)
 
                     return sshsock
 
@@ -316,13 +322,8 @@ class SSHConnectionCache (_SSHConnectionCache):
 
             # True below is to use users ssh config, should this be part of get_ssh_socket
             # API?
-            ossock, sshsock = _SSHConnectionCache._open_ssh_socket(host,
-                                                                   port,
-                                                                   username,
-                                                                   password,
-                                                                   True,
-                                                                   debug,
-                                                                   proxycmd)
+            ossock, sshsock = _SSHConnectionCache._open_ssh_socket(host, port, username, password,
+                                                                   True, debug, proxycmd)
 
             if key not in self.ssh_sockets:
                 self.ssh_sockets[key] = []
@@ -331,7 +332,7 @@ class SSHConnectionCache (_SSHConnectionCache):
             self.ssh_socket_keys[sshsock] = key
             return sshsock
 
-    def cancel_close_socket_expire (self, ssh_socket, debug):
+    def _cancel_close_socket_expire(self, ssh_socket, debug):
         """Must enter locked"""
         if not ssh_socket:
             return
@@ -343,7 +344,7 @@ class SSHConnectionCache (_SSHConnectionCache):
         del self.ssh_socket_timeout[ssh_socket]
         timer.cancel()
 
-    def _close_socket_expire (self, ssh_socket, debug):
+    def _close_socket_expire(self, ssh_socket, debug):
         if not ssh_socket:
             return
 
@@ -359,7 +360,10 @@ class SSHConnectionCache (_SSHConnectionCache):
             del self.ssh_socket_timeout[ssh_socket]
             self._close_socket(ssh_socket, debug)
 
-    def release_ssh_socket (self, ssh_socket, debug):
+    def release_ssh_socket(self, ssh_socket, debug):
+        """Release a refrence on an open socket.
+
+        `release_ssh_socket` must be paired with each call to `get_ssh_socket`."""
         if not ssh_socket:
             return
 
@@ -385,12 +389,11 @@ class SSHConnectionCache (_SSHConnectionCache):
             if ssh_socket not in self.ssh_socket_timeout:
                 if debug:
                     logger.debug("Setting up timer to release ssh socket: %s", str(ssh_socket))
-                self.ssh_socket_timeout[ssh_socket] = threading.Timer(1,
-                                                                      self._close_socket_expire,
-                                                                      [ssh_socket, debug])
+                self.ssh_socket_timeout[ssh_socket] = threading.Timer(
+                    self.close_timeout, self._close_socket_expire, [ssh_socket, debug])
                 self.ssh_socket_timeout[ssh_socket].start()
 
-    def _close_socket (self, ssh_socket, debug):
+    def _close_socket(self, ssh_socket, debug):
         entry = None
         try:
             key = self.ssh_socket_keys[ssh_socket]
@@ -410,25 +413,44 @@ class SSHConnectionCache (_SSHConnectionCache):
                 entry[0].close()
                 entry[0] = None
         except Exception as error:
-            logger.info("%s: Unexpected exception: %s: %s", str(self), str(error), traceback.format_exc())
+            logger.info("%s: Unexpected exception: %s: %s", str(self), str(error),
+                        traceback.format_exc())
             logger.error("%s: Unexpected error closing socket:  %s", str(self), str(error))
         finally:
             del self.ssh_socket_keys[ssh_socket]
             if entry:
                 self.ssh_sockets[key].remove(entry)
 
-    def __str__ (self):
+    def flush(self, debug=False):
+        """Flush (close) any un-referenced open entries currently waiting for timeout."""
+        # XXX change this when we create a class
+        with self.ssh_sockets_lock:
+            for key in self.ssh_sockets:
+                for entry in self.ssh_sockets[key]:
+                    ssh_socket = entry[1]
+                    try:
+                        timer = self.ssh_socket_timeout[ssh_socket]
+                    except KeyError:
+                        continue
+                    if timer is None:
+                        continue
+                    if debug:
+                        logger.debug("Flush: canceling and releasing ssh socket: %s",
+                                     str(ssh_socket))
+                    timer.cancel()
+                    del self.ssh_socket_timeout[ssh_socket]
+                    self._close_socket(ssh_socket, debug)
+
+    def __str__(self):
         "Return a nice string for the cache object"
         return "SSHConnectionCache(\"{}\", close_timeout={}, max_channels={})".format(
-            self.desc,
-            self.close_timeout,
-            self.max_channels)
+            self.desc, self.close_timeout, self.max_channels)
 
 
-def setup_travis ():
+def _setup_travis():
     import getpass
     import sys
-    global private_key                                      # pylint: disable=W0603
+    global _private_key  # pylint: disable=W0603
 
     logging.basicConfig(level=logging.DEBUG, stream=sys.stderr)
     print("Setup called.")
@@ -440,6 +462,11 @@ def setup_travis ():
             return
 
     print("Executing under Travis-CI")
+
+    print("Disabling global caching")
+    from . import DisableGlobalCaching
+    DisableGlobalCaching()
+
     ssh_dir = "{}/.ssh".format(os.environ['HOME'])
     priv_filename = os.path.join(ssh_dir, "id_rsa")
     if os.path.exists(priv_filename):
@@ -447,26 +474,21 @@ def setup_travis ():
         print("Found private keyfile")
         return
     else:
-        logger.error("Creating ssh dir " + ssh_dir)
+        logger.error("Creating ssh dir: %s", ssh_dir)
         print("Creating ssh dir " + ssh_dir)
         os.system("mkdir -p {}".format(ssh_dir))
         priv = ssh.RSAKey.generate(bits=1024)
-        private_key = priv
+        _private_key = priv
 
-        logger.error("Generating private keyfile " + priv_filename)
+        logger.error("Generating private keyfile: %s", priv_filename)
         print("Generating private keyfile " + priv_filename)
         priv.write_private_key_file(filename=priv_filename)
 
         pub = ssh.RSAKey(filename=priv_filename)
         auth_filename = os.path.join(ssh_dir, "authorized_keys")
-        logger.error("Adding keys to authorized_keys file " + auth_filename)
+        logger.error("Adding keys to authorized_keys file: %s", auth_filename)
         print("Adding keys to authorized_keys file " + auth_filename)
         with open(auth_filename, "a") as authfile:
             authfile.write("{} {}\n".format(pub.get_name(), pub.get_base64()))
         logger.error("Done generating keys")
         print("Done generating keys")
-
-
-__author__ = 'Christian Hopps'
-__date__ = 'December 14 2016'
-__docformat__ = "restructuredtext en"
