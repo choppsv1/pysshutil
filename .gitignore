@@ -18,5 +18,5 @@ GTAGS
 build/
 dist/
 
-# sphinx
-doc/source/api/
+# sphinx - read the docs needs these files, or I don't know how to make it work. :(
+# doc/source/api/

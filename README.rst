@@ -19,5 +19,5 @@ branch status:
 .. image:: https://coveralls.io/repos/choppsv1/pysshutil/badge.svg?branch=master&service=github
    :target: https://coveralls.io/github/choppsv1/pysshutil?branch=master
 
-.. image: http://pysshutil.readthedocs.io/en/latest/?badge=latest
-   :target: http://pysshutil.readthedocs.io/en/latest/?badge=latest
+.. image:: https://readthedocs.org/projects/pysshutil/badge/?version=latest
+   :target: http://pysshutil.readthedocs.io/en/latest/
