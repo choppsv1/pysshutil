@@ -21,7 +21,7 @@ doc:
 clean:
 	find . -name '*.pyc' -exec rm {} +
 	$(PYTHON) setup.py clean
-	rm -rf doc/build bulid
+	rm -rf doc/build build
 
 install:
 	$(PIP) install -e .

@@ -463,6 +463,16 @@ class SSHServer(object):
                     except ssh.AuthenticationException as error:
                         logger.debug("%s: Client auth failed: %s: %s: %s", str(self), str(client),
                                      str(addr), str(error))
+                    except EOFError as error:
+                        logger.debug("%s: Client closed the connection during accept: %s: %s: %s",
+                                     str(self), str(client), str(addr), str(error))
+                    except Exception as error:
+                        if self.debug:
+                            logger.error("%s: Unexpected exception during accept: %s: %s",
+                                         str(self), str(error), traceback.format_exc())
+                        else:
+                            logger.error("%s: Unexpected exception during accept: %s closing",
+                                         str(self), str(error))
 
         except Exception as error:
             if self.debug:
