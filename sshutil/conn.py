@@ -59,8 +59,8 @@ class SSHConnection(object):
         if cache is None:
             cache = g_cache
 
-        self.host = host
-        self.port = port
+        self.host = str(host)
+        self.port = int(port)
         self.debug = debug
         self.cache = cache
         self.host_key = None

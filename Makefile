@@ -42,4 +42,12 @@ run-test:
 	$(PYTEST) -v --doctest-modules
 
 pypi-upload:
-	python setup.py sdist upload
+	$(PYTHON) setup.py sdist bdist_wheel
+	$(PYTHON) setup.py --version
+	PYPKGVER=$$($(PYTHON) setup.py --version); \
+	PYPKGNAME=$$($(PYTHON) setup.py --name); \
+	echo "package: $$PYPKGNAME version: $${PYPKGVER}"; \
+	if [[ "$${PYPKGVER%%.dev*}" == "$${PYPKGVER}" ]]; then \
+		echo "Deploying $${PYPKGVER} of $${PYPKGNAME}"; \
+		for f in dist/*; do if [[ -f $$f ]]; then twine upload --skip-existing $$f; fi; done; \
+	fi
