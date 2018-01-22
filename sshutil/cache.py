@@ -45,7 +45,7 @@ def _socket_is_remote_closed(sock):
         if sock in rfds:
             buf = sock.recv(1, socket.MSG_PEEK)
             if not buf:
-                logger.debug("****** read 0 on peek assuming closed")
+                logger.debug("Read 0 PEEK after select ready -- assuming closed.")
                 return True
         return False
     except Exception as error:
@@ -168,7 +168,11 @@ class _SSHConnectionCache(object):
             if not sshsock.is_authenticated() and password is not None:
                 try:
                     sshsock.auth_password(username, password, event, False)
-                except (ssh.AuthenticationException, ssh.BadAuthenticationType) as error:
+                except ssh.BadAuthenticationType as error:
+                    logger.debug("Password auth not allowed (cont): %s: %s", str(username),
+                                 str(error))
+                    autherr = error
+                except ssh.AuthenticationException as error:
                     logger.debug("Password auth failed (cont): %s: %s", str(username), str(error))
                     autherr = error
                 else:
@@ -211,6 +215,10 @@ class _SSHConnectionCache(object):
             #                 username=self.username,
             #                 password=self.password)
             return ossock, sshsock
+        except ssh.BadAuthenticationType as error:
+            ossock.close()
+            logger.error("Authentication not allowed: %s", str(error))
+            raise
         except ssh.AuthenticationException as error:
             ossock.close()
             logger.error("Authentication failed: %s", str(error))
@@ -387,11 +395,22 @@ class SSHConnectionCache(_SSHConnectionCache):
             # We are all done with this socket
             # Setup a timer to actually close the socket.
             if ssh_socket not in self.ssh_socket_timeout:
-                if debug:
-                    logger.debug("Setting up timer to release ssh socket: %s", str(ssh_socket))
-                self.ssh_socket_timeout[ssh_socket] = threading.Timer(
-                    self.close_timeout, self._close_socket_expire, [ssh_socket, debug])
-                self.ssh_socket_timeout[ssh_socket].start()
+                inactive = not ssh_socket.is_active()
+                if inactive or _socket_is_remote_closed(entry[0]):
+                    if debug:
+                        if inactive:
+                            logger.debug("Immediate release of inactive ssh socket: %s",
+                                         str(ssh_socket))
+                        else:
+                            logger.debug("Immediate release of remote closed ssh socket: %s",
+                                         str(ssh_socket))
+                    self._close_socket(ssh_socket, debug)
+                else:
+                    if debug:
+                        logger.debug("Setting up timer to release ssh socket: %s", str(ssh_socket))
+                    self.ssh_socket_timeout[ssh_socket] = threading.Timer(
+                        self.close_timeout, self._close_socket_expire, [ssh_socket, debug])
+                    self.ssh_socket_timeout[ssh_socket].start()
 
     def _close_socket(self, ssh_socket, debug):
         entry = None
