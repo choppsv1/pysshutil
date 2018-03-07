@@ -84,9 +84,7 @@ def test_multi_session():
 
 
 def wait_port_open(addr, timeout):
-    now = time.time()
-    expire = now + timeout
-
+    expire = time.time() + timeout
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         while time.time() < expire:
@@ -117,7 +115,7 @@ def _test_server_close(cache):
     else:
         raise error
 
-    wait_port_open(("127.0.0.1", port))
+    wait_port_open(("127.0.0.1", port), 2)
 
     logger.info("Connect to server on port %d", port)
     session = conn.SSHSession("127.0.0.1", password="admin", port=port, debug=CLIENT_DEBUG)
@@ -139,7 +137,7 @@ def _test_server_close(cache):
         logger.debug("Starting %d iteration", i)
         ns = server.SSHServer(server_ctl, port=port, host_key="tests/host_key", debug=SERVER_DEBUG)
 
-        wait_port_open(("127.0.0.1", port))
+        wait_port_open(("127.0.0.1", port), 2)
 
         logger.info("Connect to server on port %d", port)
         session = conn.SSHSession("127.0.0.1", password="admin", port=port, debug=CLIENT_DEBUG)
