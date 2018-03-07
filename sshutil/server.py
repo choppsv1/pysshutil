@@ -407,6 +407,7 @@ class SSHServerAny(object):
         addr = list(addr)
         if addr[1] == 0 and self.port:
             addr[1] = self.port
+        addr = tuple(addr)
 
         if self.debug:
             logger.debug("Server binding to proto %s addr %s", str(pname), str(addr))
