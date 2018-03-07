@@ -378,9 +378,8 @@ class SSHServerAny(object):
         try:
             self.start_listen_thread(("", port))
         except socket.error as error:
-            if error.errno == errno.EADDRINUSE:
-                pass
-            raise
+            if error.errno != errno.EADDRINUSE:
+                raise
 
     def __del__(self):
         logger.error("Deleting %s", str(self))
