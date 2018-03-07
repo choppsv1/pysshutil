@@ -21,6 +21,7 @@ import errno
 import getpass
 import logging
 import socket
+import time
 from sshutil.cache import SSHConnectionCache, SSHNoConnectionCache
 import sshutil.conn as conn
 import sshutil.server as server
@@ -82,11 +83,28 @@ def test_multi_session():
     logger.debug("Multi-session test complete")
 
 
+def wait_port_open(addr, timeout):
+    now = time.time()
+    expire = now + timeout
+
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        while time.time() < expire:
+            if sock.connect_ex(addr) == 0:
+                return
+            time.sleep(.1)
+        raise Exception("{} never opened".format(addr))
+    finally:
+        sock.close()
+
+
 def _test_server_close(cache):
     server_ctl = server.SSHUserPassController(username=getpass.getuser(), password="admin")
     port = None
-    LAST_INDEX = 40000 + 5000
-    for port in range(40000, LAST_INDEX + 1):
+
+    # Find an open reservable port
+    test_port_can_start = 10000
+    for port in range(test_port_can_start, test_port_can_start + 100):
         try:
             logger.info("Create server on port %d", port)
             ns = server.SSHServer(
@@ -94,8 +112,12 @@ def _test_server_close(cache):
             break
         except socket.error as error:
             logger.info("Got exception: %s %d %d", str(error), error.errno, errno.EADDRINUSE)
-            if error.errno != errno.EADDRINUSE or port == LAST_INDEX:
+            if error.errno != errno.EADDRINUSE:
                 raise
+    else:
+        raise error
+
+    wait_port_open(("127.0.0.1", port))
 
     logger.info("Connect to server on port %d", port)
     session = conn.SSHSession("127.0.0.1", password="admin", port=port, debug=CLIENT_DEBUG)
@@ -112,9 +134,12 @@ def _test_server_close(cache):
     # import time
     # time.sleep(.1)
 
+    # Now iterate checking that we can open on the port after cleanup, making sure our cleanup happened
     for i in range(0, 10):
         logger.debug("Starting %d iteration", i)
         ns = server.SSHServer(server_ctl, port=port, host_key="tests/host_key", debug=SERVER_DEBUG)
+
+        wait_port_open(("127.0.0.1", port))
 
         logger.info("Connect to server on port %d", port)
         session = conn.SSHSession("127.0.0.1", password="admin", port=port, debug=CLIENT_DEBUG)
