@@ -24,9 +24,15 @@ sys.path.insert(0, os.path.abspath('../..'))
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom ones.
 extensions = [
     'sphinx.ext.autodoc',
-    #'sphinx.ext.intersphinx',
+    'sphinx.ext.intersphinx',
     #'sphinx.ext.todo",
 ]
+
+intersphinx_mapping = {
+    'paramiko': ('http://docs.paramiko.org/en/2.4', None),
+    'python': ('https://docs.python.org/3', None),
+    'ssh': ('http://docs.paramiko.org/en/2.4', None),
+}
 
 # autodoc generation is a bit aggressive and a nuisance when doing heavy
 # text edit cycles.

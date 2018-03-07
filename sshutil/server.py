@@ -305,11 +305,22 @@ class SSHServerSocket(object):
             raise
 
 
-class SSHServer(object):
-    """An ssh server"""
+# Eventually we want to have use Listen and CallHome Mixins and a base Server class I guess.
 
-    def __del__(self):
-        logger.error("Deleting %s", str(self))
+
+class SSHServerAny(object):
+    """
+    An SSH server listening on ANY address of IPv4/IPv6.
+
+    :param server_ctl: Server (access) control see :class:`paramiko.server.ServerInterface`.
+    :param server_socket_class: A class that is instantiated when accepting a connection. The default is :class:`SSHServerSocket`.
+    :param server_session_class: A class that is instantiated when creating an SSH session. The default is :class:`SSHServerSession`.
+    :param extra_args: This value is passed to the server_socket_class which then passes it to the server_session_class.
+    :param port: The port to bind the server to or None to let the host assign. If the value is -1 then no listen socket is opened.
+    :param host_key: The server host_key. If None then try and use the host rsa or dsa host keys in /etc/ssh.
+    :type host_key: None, :class:`paramiko.pkey.PKey`, or a filename of the key to load.
+    :param debug: True to enable debug logging.
+    """
 
     def __init__(self,
                  server_ctl=None,
@@ -319,7 +330,6 @@ class SSHServer(object):
                  port=None,
                  host_key=None,
                  debug=False):
-
         if server_ctl is None:
             server_ctl = SSHUserPassController()
         self.server_ctl = server_ctl
@@ -341,8 +351,12 @@ class SSHServer(object):
 
         # Load the host key for our ssh server.
         if host_key:
-            assert os.path.exists(host_key)
-            self.host_key = ssh.RSAKey.from_private_key_file(host_key)
+            try:
+                host_key.get_fingerprint  # pylint: disable=W0104
+                self.host_key = host_key
+            except AttributeError:
+                assert os.path.exists(host_key)
+                self.host_key = ssh.RSAKey.from_private_key_file(host_key)
         else:
             for keypath in ["/etc/ssh/ssh_host_rsa_key", "/etc/ssh/ssh_host_dsa_key"]:
                 # XXX check we have access
@@ -350,69 +364,94 @@ class SSHServer(object):
                     self.host_key = ssh.RSAKey.from_private_key_file(keypath)
                     break
 
-        #
-        # XXX we want to reuse this code in the client call home case.
-        #
+        self.lock = threading.Lock()
+        self.sockets = []
+        self.threads = []
+
+        # This sucks that we can't use None for no listen, oh well backward compat.
+        if port == -1:
+            return
 
         # Bind first to IPv6, if the OS supports binding per AF then the IPv4
         # will succeed, otherwise the IPv6 will support both AF.
-        for pname, host, proto in [("IPv6", '::', socket.AF_INET6), ("IPv4", '', socket.AF_INET)]:
-            protosocket = socket.socket(proto, socket.SOCK_STREAM)
-            protosocket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            if self.debug:
-                logger.debug("Server binding to proto %s port %s", str(pname), str(port))
-            if proto == socket.AF_INET:
-                try:
-                    protosocket.bind((host, port))
-                except socket.error as error:
-                    if error.errno == errno.EADDRINUSE:
-                        break
-                    else:
-                        logger.debug("Server error binding to proto %s port %s error: %s",
-                                     str(pname), str(port), str(error))
-                        raise
-                except Exception as error:
-                    logger.debug("Server exception binding to proto %s port %s type %s: error: %s",
-                                 str(pname), str(port), str(error.__class__), str(error))
-                    raise
-            else:
-                protosocket.bind((host, port, 0, 0))
+        self.start_listen_thread(("::", port))
+        try:
+            self.start_listen_thread(("", port))
+        except socket.error as error:
+            if error.errno == errno.EADDRINUSE:
+                pass
+            raise
 
-            if port == 0:
-                assigned = protosocket.getsockname()
-                self.port = assigned[1]
+    def __del__(self):
+        logger.error("Deleting %s", str(self))
 
-            if self.debug:
-                logger.debug("Server listening on proto %s port %s", str(pname), str(port))
-            protosocket.listen(100)
+    def start_listen_thread(self, addr):
+        """Start a thread listening on a given address.
 
-            # Create a socket to cause closure.
-            self.close_wsocket, self.close_rsocket = socket.socketpair()
+        :param addr: addr tuple to bind to, port can be 0 for any(*). '' is any IPv4, '::' is any
+                     IPv6 (or v4 on certain OS). Hostnames are not allowed.
 
-            self.lock = threading.Lock()
-            self.sockets = []
+        (*) - If port is 0 and a previous listen thread was created and assigned a port then
+        it will re-use that value and not 0.
+        """
+        if addr[0] == '' or ":" not in addr[0]:
+            proto = socket.AF_INET
+            pname = "IPv4"
+        else:
+            proto = socket.AF_INET6
+            pname = "IPv6"
 
-            self.thread = threading.Thread(
-                None,
-                self._accept_socket_thread,
-                name="SSHAcceptThread " + pname,
-                args=[protosocket])
-            self.thread.daemon = True
-            self.thread.start()
+        protosocket = socket.socket(proto, socket.SOCK_STREAM)
+        protosocket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+        addr = list(addr)
+        if addr[1] == 0 and self.port:
+            addr[1] = self.port
+
+        if self.debug:
+            logger.debug("Server binding to proto %s addr %s", str(pname), str(addr))
+
+        protosocket.bind(addr)
+        assigned = protosocket.getsockname()
+        port = assigned[1]
+
+        # XXX So the first bind with no port selects the port for all AF.
+        if self.port == 0:
+            self.port = port
+
+        if self.debug:
+            logger.debug("Server listening on proto %s port %s", str(pname), str(port))
+        protosocket.listen(100)
+
+        # Create a socket to cause closure.
+        close_wsocket, close_rsocket = socket.socketpair()
+
+        thread = threading.Thread(
+            None,
+            self._accept_socket_thread,
+            name="SSHAcceptThread " + pname,
+            args=[protosocket, close_rsocket])
+        thread.daemon = True
+        thread.listen_port = port
+
+        with self.lock:
+            self.threads.append((thread, close_wsocket))
+            thread.start()
 
     def close(self):
         if self.debug:
             logger.debug("%s: Close called", str(self))
         with self.lock:
             logger.info("Sending close signal to accept socket")
-            assert self.thread.is_alive()
-            self.close_wsocket.send(b"!")
+            for thread, sock in self.threads:
+                assert thread.is_alive()
+                sock.send(b"!")
 
     def join(self):
         "Wait on server to terminate"
-        assert self.thread
-        self.thread.join()
-        self.thread = None
+        while self.threads:
+            thread, _ = self.threads.pop()
+            thread.join()
 
     def remove_socket(self, serversocket):
         with self.lock:
@@ -437,15 +476,15 @@ class SSHServer(object):
         with self.lock:
             self.sockets.append(sock)
 
-    def _accept_socket_thread(self, proto_sock):
+    def _accept_socket_thread(self, proto_sock, close_sock):
         """Call from within a thread to accept connections."""
         try:
             while True:
                 if self.debug:
                     logger.debug("%s: Accepting connections", str(self))
 
-                rfds, unused, unused = select.select([proto_sock, self.close_rsocket], [], [])
-                if self.close_rsocket in rfds:
+                rfds, unused, unused = select.select([proto_sock, close_sock], [], [])
+                if close_sock in rfds:
                     if self.debug:
                         logger.debug("%s: Got close notification closing down server", str(self))
 
@@ -474,9 +513,8 @@ class SSHServer(object):
 
                     # Close our closing socket.
                     if self.debug:
-                        logger.debug("%s: closing close socket %s", str(self),
-                                     str(self.close_rsocket))
-                    self.close_rsocket.close()
+                        logger.debug("%s: closing close socket %s", str(self), str(close_sock))
+                    close_sock.close()
 
                     logger.debug("%s: exiting accept thread", str(self))
                     return
@@ -514,6 +552,8 @@ class SSHServer(object):
     def __str__(self):
         return "SSHServer(port={})".format(self.port)
 
+
+SSHServer = SSHServerAny
 
 #
 # class SSHCallHomeClientServer
