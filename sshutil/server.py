@@ -26,6 +26,8 @@ import threading
 import traceback
 import paramiko as ssh
 
+from . import cache
+
 logger = logging.getLogger(__name__)
 
 
@@ -348,6 +350,10 @@ class SSHServer(object):
                     self.host_key = ssh.RSAKey.from_private_key_file(keypath)
                     break
 
+        #
+        # XXX we want to reuse this code in the client call home case.
+        #
+
         # Bind first to IPv6, if the OS supports binding per AF then the IPv4
         # will succeed, otherwise the IPv6 will support both AF.
         for pname, host, proto in [("IPv6", '::', socket.AF_INET6), ("IPv4", '', socket.AF_INET)]:
@@ -395,6 +401,8 @@ class SSHServer(object):
             self.thread.start()
 
     def close(self):
+        if self.debug:
+            logger.debug("%s: Close called", str(self))
         with self.lock:
             logger.info("Sending close signal to accept socket")
             assert self.thread.is_alive()
@@ -408,7 +416,26 @@ class SSHServer(object):
 
     def remove_socket(self, serversocket):
         with self.lock:
-            self.sockets.remove(serversocket)
+            if serversocket in self.sockets:
+                self.sockets.remove(serversocket)
+
+    def call_home(self, host, port, debug=False):
+        """Open TCP connection towards client, otherwise everything else the same.
+
+        :param host: hostname or IP address.
+        :param port: port to conenct to.
+        :returns: a new connected socket.
+        :raises: Exception if can't connect or resolve the address.
+        """
+        logger.debug("%s: Calling home to client: %s:%s", str(self), str(host), str(port))
+        client = cache.open_connect_socket(host, port, debug=debug)
+        addr = client.getpeername()
+        logger.debug("%s: Call home connected to %s", str(self), str(addr))
+
+        sock = self.server_socket_class(self.server_ctl, self.server_session_class, self.extra_args,
+                                        self, client, addr, self.debug)
+        with self.lock:
+            self.sockets.append(sock)
 
     def _accept_socket_thread(self, proto_sock):
         """Call from within a thread to accept connections."""
@@ -428,11 +455,14 @@ class SSHServer(object):
                     logger.debug("%s: closing %d server socket[s]", str(self), len(sockets))
 
                     # These sockets are channels
-                    for sock in sockets:
-                        if sock in self.sockets:
-                            if self.debug:
-                                logger.debug("%s: closing server socket %s", str(self), str(sock))
-                            sock.close()
+                    while True:
+                        with self.lock:
+                            if not self.sockets:
+                                break
+                            sock = self.sockets.pop()
+                        if self.debug:
+                            logger.debug("%s: closing server socket %s", str(self), str(sock))
+                        sock.close()
 
                     # Not until we have a real shutdown
                     # assert not self.sockets
@@ -484,6 +514,10 @@ class SSHServer(object):
     def __str__(self):
         return "SSHServer(port={})".format(self.port)
 
+
+#
+# class SSHCallHomeClientServer
+#
 
 __author__ = 'Christian Hopps'
 __date__ = 'December 14 2016'

@@ -17,6 +17,9 @@
 from __future__ import absolute_import, division, unicode_literals, print_function, nested_scopes
 import getpass
 import logging
+import socket
+import paramiko as ssh
+import sshutil.cache
 
 from . import g_cache
 
@@ -64,8 +67,6 @@ class SSHConnection(object):
         self.debug = debug
         self.cache = cache
         self.host_key = None
-        self.chan = None
-        self.ssh = None
 
         if not username:
             username = getpass.getuser()
@@ -203,3 +204,117 @@ class SSHCommandSession(SSHSession):
 
     def recv_exit_status(self):
         return self.chan.recv_exit_status()
+
+
+class SSHSimpleCallHomeClient(object):
+    """An example call home client."""
+
+    def __init__(self, bind_addr, subsystem, username=None, password=None, debug=False):
+        """An example client session to a server using a given subsystem where the server connects to us.
+
+        :param bind_addr: The address to listen on on.
+        :param subsystem: The subsystem to open over the SSH channel.
+        :param username: The username to authenticate with if `None` getpass.get_user() is used.
+        :param password: The password or public key to authenticate with.
+                         If `None` given will also try using an SSH agent.
+        :type password: str or ssh.PKey
+        :param debug: True to enable debug level logging.
+        """
+        self.username = username
+        self.password = password
+        self.listensock = None
+        self.subsystem = subsystem
+        self.peeraddr = None
+        self.ossock = None
+        self.sshsock = None
+        self.chan = None
+        self.debug = debug
+
+        # Open a listening socket and accept a connection.
+        proto = socket.AF_INET6 if ":" in bind_addr[0] else socket.AF_INET
+        self.listensock = socket.socket(proto, socket.SOCK_STREAM)
+        self.listensock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.listensock.bind(bind_addr)
+        self.listenaddr = self.listensock.getsockname()
+        self.listensock.listen(1)
+
+    def accept_call_home(self, host_keys):
+        """Accept a connection from the listen socket.
+
+        :param subsystem: The subsystem to invoke on the connection request.
+        :param host_keys: A dict of hostname whose value are a list of keys.
+        :returns: None
+        :raises:  SSHException
+        """
+        (self.ossock, self.peeraddr) = self.listensock.accept()
+
+        def validate_keys(sshsock, key):
+            # self is really the client not this policy object??? a bug said this, but code seems different
+            peeraddr = sshsock.sock.getpeername()
+            hostname = peeraddr[0]
+            if hostname not in host_keys:
+                raise ssh.SSHException('No hostkey found for server {}'.format(hostname))
+            if key not in host_keys[hostname]:
+                if host_keys[hostname]:
+                    raise ssh.BadHostKeyException(hostname, key, host_keys[hostname][0])
+                raise ssh.SSHException('No hostkey matched for server {}'.format(hostname))
+            return True
+
+        # Initialize/authenticate the ssh connection.
+        self.sshsock = ssh.Transport(self.ossock)
+        sshutil.cache.start_ssh(self.sshsock, self.username, self.password, validate_keys,
+                                self.debug)
+
+        # Open the channel.
+        try:
+            self.chan = self.sshsock.open_session()
+            self.chan.invoke_subsystem(self.subsystem)
+        except:
+            self.close()
+            raise
+
+    #
+    # XXX this duplicates SSHSession+parents, come up with a better way, maybe mixin
+    #
+    def __del__(self):
+        # Make sure we get rid of the cached reference to the open ssh socket
+        if hasattr(self, "chan"):
+            self.close()
+
+    def send(self, chunk):
+        assert self.chan is not None
+        return self.chan.send(chunk)
+
+    def sendall(self, chunk):
+        assert self.chan is not None
+        self.chan.sendall(chunk)
+
+    def recv(self, size=MAXSSHBUF):
+        assert self.chan is not None
+        return self.chan.recv(size)
+
+    def recv_ready(self):
+        assert self.chan is not None
+        return self.chan.recv_ready()
+
+    def recv_stderr(self, size=MAXSSHBUF):
+        assert self.chan is not None
+        return self.chan.recv_stderr(size)
+
+    def recv_stderr_ready(self):
+        assert self.chan is not None
+        return self.chan.recv_stderr_ready()
+
+    def close(self):
+        socks = [self.chan, self.sshsock, self.ossock, self.listensock]
+        self.chan = None
+        self.sshsock = None
+        self.ossock = None
+        self.listensock = None
+        for sock in socks:
+            if self.debug:
+                logger.debug("Closing %s", str(sock))
+            sock.close()
+
+    def is_active(self):
+        return self.chan and self.sshsock and self.sshsock.is_active()

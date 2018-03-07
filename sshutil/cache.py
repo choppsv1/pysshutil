@@ -54,6 +54,120 @@ def _socket_is_remote_closed(sock):
         return True
 
 
+def open_connect_socket(host, port, debug):
+    """Open an OS socket to a given host:port doing proper address resolution"""
+    del debug
+
+    attempt = 0
+    error = None
+    for addrinfo in socket.getaddrinfo(host, port, socket.AF_UNSPEC, socket.SOCK_STREAM):
+        af, socktype, proto, unused_name, sa = addrinfo
+        try:
+            ossock = socket.socket(af, socktype, proto)
+            ossock.connect(sa)
+            if attempt:
+                logger.debug("Succeeded after %s attempts to : %s", str(attempt), str(addrinfo))
+            return ossock
+        except socket.error as ex:
+            logger.debug("Got socket error connecting to: %s: %s", str(addrinfo), str(ex))
+            attempt += 1
+            error = ex
+            continue
+    if error is not None:
+        logger.debug(
+            "Got error connecting to: %s: %s (no addr)",
+            str(addrinfo),  # pylint: disable=W0631
+            str(error))
+        raise error  # pylint: disable=E0702
+    raise Exception("Couldn't connect to any resolution for {}:{}".format(host, port))
+
+
+def start_ssh(sshsock, username, password, validate_keys, debug):
+    """Open ssh connection given an existing connected TCP socket"""
+    del debug
+    try:
+        # self.ssh.set_missing_host_key_policy(ssh.AutoAddPolicy())
+
+        # XXX this takes an event so we could yield here to wait for event.
+        event = None
+        sshsock.start_client(event)
+
+        if validate_keys:
+            server_key = sshsock.get_remote_server_key()
+            validate_keys(sshsock, server_key)
+
+        try:
+            password.get_name
+        except AttributeError:
+            password = password
+            passkey = None
+        else:
+            passkey = password
+            password = None
+
+        # try:
+        #     sshsock.auth_none(username)
+        # except (ssh.AuthenticationException, ssh.BadAuthenticationType):
+        #     pass
+
+        logger.debug("Trying to authenticate with username: %s", str(username))
+        autherr = ("No authentication methods worked")
+        if not sshsock.is_authenticated() and password is not None:
+            try:
+                sshsock.auth_password(username, password, event, False)
+            except ssh.BadAuthenticationType as error:
+                logger.debug("Password auth not allowed (cont): %s: %s", str(username), str(error))
+                autherr = error
+            except ssh.AuthenticationException as error:
+                logger.debug("Password auth failed (cont): %s: %s", str(username), str(error))
+                autherr = error
+            else:
+                if not sshsock.is_authenticated():
+                    logger.warning("Password auth failed no error (cont) for %s", str(username))
+
+        if not sshsock.is_authenticated() and passkey is not None:
+            try:
+                sshsock.auth_publickey(username, passkey, event)
+            except ssh.AuthenticationException as error:
+                logger.debug("Pubkey auth failed (cont): %s", str(error))
+                autherr = error
+            else:
+                if not sshsock.is_authenticated():
+                    logger.warning("Pubkey auth failed no error (cont)")
+
+        if not sshsock.is_authenticated():
+            ssh_keys = ssh.Agent().get_keys()
+            if _private_key:
+                # Used by travis-ci
+                ssh_keys += (_private_key, )
+            lastkey = len(ssh_keys) - 1
+            for idx, ssh_key in enumerate(ssh_keys):
+                if sshsock.is_authenticated():
+                    break
+                try:
+                    sshsock.auth_publickey(username, ssh_key, event)
+                except ssh.AuthenticationException as error:
+                    if idx == lastkey:
+                        raise
+                    logger.debug("Pubkey auth failed (cont): %s", str(error))
+                    # Try next key
+        if not sshsock.is_authenticated():
+            raise autherr
+
+        # nextauth (rval from above) would be a secondary authentication e.g., google authenticator.
+
+        # XXX using the below instead of the breakout above fails threaded.
+        # sshsock.connect(hostkey=None,
+        #                 username=self.username,
+        #                 password=self.password)
+    except ssh.BadAuthenticationType as error:
+        logger.error("Authentication not allowed: %s", str(error))
+        raise
+    except ssh.AuthenticationException as error:
+        logger.error("Authentication failed: %s", str(error))
+        raise
+
+
 class _SSHConnectionCache(object):
     ssh_config = None
 
@@ -103,30 +217,8 @@ class _SSHConnectionCache(object):
         if debug:
             logger.debug("Opening os socket to %s on port %s", str(host), str(port))
 
-        attempt = 0
         try:
-            error = None
-            for addrinfo in socket.getaddrinfo(host, port, socket.AF_UNSPEC, socket.SOCK_STREAM):
-                af, socktype, proto, unused_name, sa = addrinfo
-                try:
-                    ossock = socket.socket(af, socktype, proto)
-                    ossock.connect(sa)
-                    if attempt:
-                        logger.debug("Succeeded after %s attempts to : %s", str(attempt),
-                                     str(addrinfo))
-                    return ossock
-                except socket.error as ex:
-                    logger.debug("Got socket error connecting to: %s: %s", str(addrinfo), str(ex))
-                    attempt += 1
-                    error = ex
-                    continue
-            if error is not None:
-                logger.debug(
-                    "Got error connecting to: %s: %s (no addr)",
-                    str(addrinfo),  # pylint: disable=W0631
-                    str(error))
-                raise error  # pylint: disable=E0702
-            raise Exception("Couldn't connect to any resolution for {}:{}".format(host, port))
+            return open_connect_socket(host, port, debug)
         except Exception as ex:
             logger.error("Got unexpected socket error connecting to: %s:%s: %s", str(host),
                          str(port), str(ex))
@@ -135,94 +227,19 @@ class _SSHConnectionCache(object):
     @classmethod
     def _open_ssh_socket(cls, host, port, username, password, use_config, debug, proxy):
         ossock = cls.open_os_socket(host, port, use_config, debug, proxy)
+        if debug:
+            logger.debug("Opening SSH socket to %s:%s", str(host), str(port))
+        sshsock = None
         try:
-            if debug:
-                logger.debug("Opening SSH socket to %s:%s", str(host), str(port))
-
             sshsock = ssh.Transport(ossock)
-            # self.ssh.set_missing_host_key_policy(ssh.AutoAddPolicy())
-
-            # XXX this takes an event so we could yield here to wait for event.
-            event = None
-            sshsock.start_client(event)
-
-            # XXX save this if we actually need it.
-            sshsock.get_remote_server_key()
-
-            try:
-                password.get_name
-            except AttributeError:
-                password = password
-                passkey = None
-            else:
-                passkey = password
-                password = None
-
-            # try:
-            #     sshsock.auth_none(username)
-            # except (ssh.AuthenticationException, ssh.BadAuthenticationType):
-            #     pass
-
-            logger.debug("Trying to authenticate with username: %s", str(username))
-            autherr = ("No authentication methods worked")
-            if not sshsock.is_authenticated() and password is not None:
-                try:
-                    sshsock.auth_password(username, password, event, False)
-                except ssh.BadAuthenticationType as error:
-                    logger.debug("Password auth not allowed (cont): %s: %s", str(username),
-                                 str(error))
-                    autherr = error
-                except ssh.AuthenticationException as error:
-                    logger.debug("Password auth failed (cont): %s: %s", str(username), str(error))
-                    autherr = error
-                else:
-                    if not sshsock.is_authenticated():
-                        logger.warning("Password auth failed no error (cont) for %s", str(username))
-
-            if not sshsock.is_authenticated() and passkey is not None:
-                try:
-                    sshsock.auth_publickey(username, passkey, event)
-                except ssh.AuthenticationException as error:
-                    logger.debug("Pubkey auth failed (cont): %s", str(error))
-                    autherr = error
-                else:
-                    if not sshsock.is_authenticated():
-                        logger.warning("Pubkey auth failed no error (cont)")
-
-            if not sshsock.is_authenticated():
-                ssh_keys = ssh.Agent().get_keys()
-                if _private_key:
-                    # Used by travis-ci
-                    ssh_keys += (_private_key, )
-                lastkey = len(ssh_keys) - 1
-                for idx, ssh_key in enumerate(ssh_keys):
-                    if sshsock.is_authenticated():
-                        break
-                    try:
-                        sshsock.auth_publickey(username, ssh_key, event)
-                    except ssh.AuthenticationException as error:
-                        if idx == lastkey:
-                            raise
-                        logger.debug("Pubkey auth failed (cont): %s", str(error))
-                        # Try next key
-            if not sshsock.is_authenticated():
-                raise autherr
-
-            # nextauth (rval from above) would be a secondary authentication e.g., google authenticator.
-
-            # XXX using the below instead of the breakout above fails threaded.
-            # sshsock.connect(hostkey=None,
-            #                 username=self.username,
-            #                 password=self.password)
-            return ossock, sshsock
-        except ssh.BadAuthenticationType as error:
+            # XXX we need to do something about server key validation.
+            start_ssh(sshsock, username, password, None, debug)
+        except Exception:
+            if sshsock:
+                sshsock.close()
             ossock.close()
-            logger.error("Authentication not allowed: %s", str(error))
             raise
-        except ssh.AuthenticationException as error:
-            ossock.close()
-            logger.error("Authentication failed: %s", str(error))
-            raise
+        return ossock, sshsock
 
     def release_ssh_socket(self, ssh_socket, debug):
         raise NotImplementedError("release_ssh_socket")
