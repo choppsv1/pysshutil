@@ -29,6 +29,15 @@ import paramiko as ssh
 logger = logging.getLogger(__name__)
 
 
+def is_sock_closed(sock):
+    """Check to see if the socket is ready for reading but nothing is there, IOW it's closed"""
+    rds, _, _ = select.select([sock], [], [], 0)
+    if rds:
+        peek = sock.recv(1, socket.MSG_PEEK | socket.MSG_DONTWAIT)
+        return len(peek) == 0
+    return False
+
+
 class SSHUserPassController(ssh.ServerInterface):
     def __init__(self, username=None, password=None):
         self.username = username
@@ -454,6 +463,13 @@ class SSHServer(object):
                 if proto_sock in rfds:
                     client, addr = proto_sock.accept()
                     logger.debug("%s: Client accepted: %s: %s", str(self), str(client), str(addr))
+
+                    if (is_sock_closed(client)):
+                        logger.debug("%s: Socket closed after accept %s from %s", str(self),
+                                     str(client), str(addr))
+                        client.close()
+                        continue
+
                     try:
                         sock = self.server_socket_class(self.server_ctl, self.server_session_class,
                                                         self.extra_args, self, client, addr,
