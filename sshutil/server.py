@@ -256,6 +256,7 @@ class SSHServerSocket(object):
 
     def _accept_chan_thread(self):
         try:
+            logger.debug("%s: Accepting channel connections", str(self))
             while True:
                 with self.lock:
                     if not self.running:
@@ -265,8 +266,9 @@ class SSHServerSocket(object):
                     # grab this while we have the lock
                     ssh_conn = self.ssh
 
-                if self.debug:
-                    logger.debug("%s: Accepting channel connections", str(self))
+                # This debug is really noisy given the timeout, disable for now.
+                # if self.debug:
+                #     logger.debug("%s: Accepting channel connections (1s timeout)", str(self))
 
                 # accept with 1s timeout, this doesn't return when we close the connection for some
                 # reason so we cannot just simply wait forever which would be preferable.
@@ -289,8 +291,11 @@ class SSHServerSocket(object):
 
                         # We can't warn here if we are doing timeouts see above.
                         # logger.warn("%s: Got channel as None still active.", str(self))
-                        if self.debug:
-                            logger.debug("%s: Got channel as None must be timeout.", str(self))
+
+                        # This debug is really noisy so we've disabled it for now.
+                        # if self.debug:
+                        #     logger.debug("%s: Got channel as None must be timeout.", str(self))
+
                         continue
 
                 session = self.session_class(channel, self.server, self.extra_args, self.debug)
