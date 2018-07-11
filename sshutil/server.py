@@ -365,7 +365,12 @@ class SSHServer(object):
         # Bind first to IPv6, if the OS supports binding per AF then the IPv4
         # will succeed, otherwise the IPv6 will support both AF.
         for pname, host, proto in [("IPv6", '::', socket.AF_INET6), ("IPv4", '', socket.AF_INET)]:
-            protosocket = socket.socket(proto, socket.SOCK_STREAM)
+            try:
+                protosocket = socket.socket(proto, socket.SOCK_STREAM)
+            except OSError as e:
+                if e.errno == errno.EAFNOSUPPORT:
+                    continue
+                raise
             protosocket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             if self.debug:
                 logger.debug("Server binding to proto %s port %s", str(pname), str(port))
