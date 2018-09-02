@@ -349,6 +349,7 @@ class SSHServer(object):
         if port is None:
             port = 0
         self.port = port
+        self.ports = {}
         self.host_key = None
 
         # Load the host key for our ssh server.
@@ -391,9 +392,15 @@ class SSHServer(object):
             else:
                 protosocket.bind((host, port, 0, 0))
 
-            if port == 0:
-                assigned = protosocket.getsockname()
-                self.port = assigned[1]
+            if port != 0:
+                assigned = port
+            else:
+                assigned = protosocket.getsockname()[1]
+            self.ports[proto] = assigned
+
+            # Backward compat
+            if self.port == 0:
+                self.port = assigned
 
             if self.debug:
                 logger.debug("Server listening on proto %s port %s", str(pname), str(port))
