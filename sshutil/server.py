@@ -420,6 +420,10 @@ class SSHServer(object):
             self.thread.daemon = True
             self.thread.start()
 
+            # Linux we only bind to one address.
+            if sys.platform == "linux" or sys.platform == "linux2":
+                break
+
     def close(self):
         with self.lock:
             logger.info("Sending close signal to accept socket")
