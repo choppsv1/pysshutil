@@ -26,8 +26,25 @@ import sys
 import threading
 import traceback
 import paramiko as ssh
+import paramiko.dsskey
+import paramiko.rsakey
+import paramiko.ecdsakey
+import paramiko.ed25519key
 
 logger = logging.getLogger(__name__)
+
+
+def from_private_key_file(keyfile, password=None):
+    """Return a private key from a file, try all the types."""
+    keyclasses = [
+        paramiko.rsakey.RSAKey, paramiko.dsskey.DSSKey, paramiko.ecdsakey.ECDSAKey,
+        paramiko.ed25519key.Ed25519Key
+    ]
+    for cl in keyclasses:
+        try:
+            return cl.from_private_key_file(keyfile, password)
+        except paramiko.SSHException:
+            continue
 
 
 def is_sock_closed(sock):
@@ -244,8 +261,8 @@ class SSHServerSocket(object):
                 self.ssh = None
 
             if self.client_socket:
-                logger.debug("%s: close closing client socket %s", str(self), str(
-                    self.client_socket))
+                logger.debug("%s: close closing client socket %s", str(self),
+                             str(self.client_socket))
                 self.client_socket.close()
                 self.client_socket = None
 
@@ -356,12 +373,12 @@ class SSHServer(object):
         # Load the host key for our ssh server.
         if host_key:
             assert os.path.exists(host_key)
-            self.host_key = ssh.RSAKey.from_private_key_file(host_key)
+            self.host_key = from_private_key_file(host_key)
         else:
             for keypath in ["/etc/ssh/ssh_host_rsa_key", "/etc/ssh/ssh_host_dsa_key"]:
                 # XXX check we have access
                 if os.path.exists(keypath):
-                    self.host_key = ssh.RSAKey.from_private_key_file(keypath)
+                    self.host_key = from_private_key_file(keypath)
                     break
 
         # Bind first to IPv6, if the OS supports binding per AF then the IPv4
