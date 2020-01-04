@@ -164,7 +164,7 @@ class _SSHConnectionCache(object):
             #     pass
 
             logger.debug("Trying to authenticate with username: %s", str(username))
-            autherr = ("No authentication methods worked")
+            autherr = ssh.AuthenticationException("No authentication methods worked")
             if not sshsock.is_authenticated() and password is not None:
                 try:
                     sshsock.auth_password(username, password, event, False)
